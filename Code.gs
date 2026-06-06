@@ -28,6 +28,26 @@ function getSpreadsheet(ssOrId) {
 }
 
 /**
+ * Helper to retrieve a setting value from the Config sheet.
+ * @param {SpreadsheetApp.Spreadsheet} ss The spreadsheet object.
+ * @param {string} key The setting name/key.
+ * @param {*} defaultValue The fallback value if key is not found or empty.
+ * @return {*}
+ */
+function getConfigValue(ss, key, defaultValue) {
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet) return defaultValue;
+  const data = configSheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === key) {
+      const val = data[i][1];
+      return (val !== undefined && val !== "") ? val : defaultValue;
+    }
+  }
+  return defaultValue;
+}
+
+/**
  * Main function: Process DMARC reports from Gmail, parse attachments,
  * append data to spreadsheet, update summary with charts and colors,
  * and export monthly CSV archive.
@@ -35,8 +55,6 @@ function getSpreadsheet(ssOrId) {
  * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
 function processDMARCReports(ssOrId) {
-  const labelName = "DMARC";
-  const processedLabelName = "DMARC/Processed";
   const sheetName = "DMARC Reports";
   const thresholdFailures = 3;
 
@@ -51,6 +69,9 @@ function processDMARCReports(ssOrId) {
     setupConfigSheet(ss); // Ensures Config exists and is correct
     setupHelpSheet(ss);   // Ensures Help tab exists
     setupDashboardSheet(ss); // Ensures Dashboard exists and is up to date
+
+    const labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
+    const processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
 
     const processedLabel = getOrCreateLabel(processedLabelName);
 
@@ -344,13 +365,23 @@ function onOpen() {
 
 /**
  * Auto-label DMARC reports in the last 7 days from common senders
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function autoLabelDMARCReports() {
+function autoLabelDMARCReports(ssOrId) {
+  let labelName = "DMARC";
+  try {
+    const ss = getSpreadsheet(ssOrId);
+    labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
+  } catch (e) {
+    Logger.log("Could not load spreadsheet config for autoLabelDMARCReports, using default 'DMARC' label: " + e.message);
+  }
+
   // Search for emails from common DMARC senders with .xml/.zip/.gz attachments in the last 7 days
   var threads = GmailApp.search(
     'newer_than:7d (subject:"Report domain:" OR subject:"DMARC" OR subject:"Aggregate report") has:attachment'
   );
-  var label = getOrCreateLabel("DMARC");
+  var label = getOrCreateLabel(labelName);
   threads.forEach(function(thread) {
     var messages = thread.getMessages();
     var hasDMARC = messages.some(function(msg) {
@@ -374,7 +405,7 @@ function autoLabelDMARCReports() {
  * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
 function autoLabelAndProcessDMARCReports(ssOrId) {
-  autoLabelDMARCReports();
+  autoLabelDMARCReports(ssOrId);
   processDMARCReports(ssOrId);
 }
 
@@ -393,9 +424,19 @@ function listSheetNames(ssOrId) {
 /**
  * Delete DMARC/Processed emails older than 7 days
  * Run this on a daily trigger to keep mailbox clean
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function deleteOldProcessedDMARCEmails() {
-  var threads = GmailApp.search('label:"DMARC/Processed" older_than:7d');
+function deleteOldProcessedDMARCEmails(ssOrId) {
+  let processedLabelName = "DMARC/Processed";
+  try {
+    const ss = getSpreadsheet(ssOrId);
+    processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
+  } catch (e) {
+    Logger.log("Could not load spreadsheet config for deleteOldProcessedDMARCEmails, using default 'DMARC/Processed' label: " + e.message);
+  }
+
+  var threads = GmailApp.search(`label:"${processedLabelName}" older_than:7d`);
   threads.forEach(function(thread) {
     thread.moveToTrash();
   });
@@ -643,15 +684,30 @@ function addDrillDownLinksToSummary(ssOrId) {
 function setupConfigSheet(ssOrId) {
   const ss = getSpreadsheet(ssOrId);
   let configSheet = ss.getSheetByName('Config');
+  const defaults = [
+    ["Report Recipients (comma separated)", Session.getActiveUser().getEmail()],
+    ["Retention Months", 12],
+    ["DMARC Label Name", "DMARC"],
+    ["DMARC Processed Label Name", "DMARC/Processed"]
+  ];
+
   if (!configSheet) {
     configSheet = ss.insertSheet('Config');
     configSheet.getRange(1, 1, 1, 2).setValues([["Setting", "Value"]]);
-    configSheet.getRange(2, 1, 1, 2).setValues([["Report Recipients (comma separated)", Session.getActiveUser().getEmail()]]);
-    configSheet.getRange(3, 1, 1, 2).setValues([["Retention Months", 12]]);
+    configSheet.getRange(2, 1, defaults.length, 2).setValues(defaults);
     configSheet.getRange(1, 1, 1, 2).setBackground("#b7e1cd").setFontWeight("bold");
     configSheet.setColumnWidths(1, 2, 260);
     configSheet.setFrozenRows(1);
     configSheet.setTabColor("#333333");
+  } else {
+    // If the Config sheet already exists, ensure new configuration settings are added
+    const data = configSheet.getDataRange().getValues();
+    const existingKeys = data.slice(1).map(row => row[0]);
+    defaults.forEach(pair => {
+      if (!existingKeys.includes(pair[0])) {
+        configSheet.appendRow(pair);
+      }
+    });
   }
 }
 
