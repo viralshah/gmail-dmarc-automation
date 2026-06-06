@@ -80,14 +80,23 @@ function processDMARCReports(ssOrId) {
 
     const sheet = getOrCreateSheet(ss, sheetName, [
       "Message ID", "Reporter", "Source IP", "Disposition",
-      "DKIM", "SPF", "Domain", "Header From", "Count", "Processed Date"
+      "DKIM", "SPF", "Domain", "Header From", "Count",
+      "Email Date", "Report Date", "Processed Date"
     ]);
+
+    // Get headers from sheet to map data to correct columns dynamically (resilient to column order/upgrades)
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const colMap = {};
+    sheetHeaders.forEach((header, index) => {
+      colMap[header] = index;
+    });
 
     // Get existing message IDs for deduplication
     const lastRow = sheet.getLastRow();
     let existingMessageIds = [];
     if (lastRow > 1) {
-      existingMessageIds = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+      const msgIdColIndex = sheetHeaders.indexOf("Message ID") !== -1 ? sheetHeaders.indexOf("Message ID") + 1 : 1;
+      existingMessageIds = sheet.getRange(2, msgIdColIndex, lastRow - 1, 1).getValues().flat();
     }
 
     // Search Gmail threads with DMARC label and attachments
@@ -99,7 +108,8 @@ function processDMARCReports(ssOrId) {
       Logger.log(`Processing thread: ${thread.getId()}`);
       for (const msg of thread.getMessages()) {
         const msgId = msg.getId();
-        Logger.log(`  Message ID: ${msgId}`);
+        const msgDate = msg.getDate();
+        Logger.log(`  Message ID: ${msgId} (Received: ${msgDate})`);
         if (existingMessageIds.includes(msgId)) {
           Logger.log(`    Skipping already processed message: ${msgId}`);
           continue;
@@ -134,6 +144,12 @@ function processDMARCReports(ssOrId) {
                 const root = xml.getRootElement();
                 const reportMeta = root.getChild("report_metadata");
                 const orgName = reportMeta ? reportMeta.getChildText("org_name") : "";
+                
+                // Parse report date range
+                const dateRange = reportMeta ? reportMeta.getChild("date_range") : null;
+                const beginSec = dateRange ? parseInt(dateRange.getChildText("begin"), 10) : null;
+                const beginDate = beginSec ? new Date(beginSec * 1000) : null;
+
                 const records = root.getChildren("record");
                 Logger.log(`        Found ${records.length} <record> elements`);
                 for (const record of records) {
@@ -150,13 +166,23 @@ function processDMARCReports(ssOrId) {
                   const dkimDomain = authResults && authResults.getChild("dkim") ? authResults.getChild("dkim").getChildText("domain") : "";
                   const spfDomain = authResults && authResults.getChild("spf") ? authResults.getChild("spf").getChildText("domain") : "";
 
-                  Logger.log(`        Appending row: [${msgId}, ${orgName}, ${ip}, ${disposition}, ${dkim}, ${spf}, ${dkimDomain || spfDomain}, ${headerFrom}, ${count}, <date>]`);
-                  // Append row with current timestamp
-                  sheet.appendRow([
-                    msgId, orgName, ip, disposition, dkim, spf,
-                    dkimDomain || spfDomain, headerFrom, count,
-                    new Date()
-                  ]);
+                  // Build row array dynamically matching sheet headers
+                  const rowData = new Array(sheetHeaders.length).fill("");
+                  if (colMap["Message ID"] !== undefined) rowData[colMap["Message ID"]] = msgId;
+                  if (colMap["Reporter"] !== undefined) rowData[colMap["Reporter"]] = orgName;
+                  if (colMap["Source IP"] !== undefined) rowData[colMap["Source IP"]] = ip;
+                  if (colMap["Disposition"] !== undefined) rowData[colMap["Disposition"]] = disposition;
+                  if (colMap["DKIM"] !== undefined) rowData[colMap["DKIM"]] = dkim;
+                  if (colMap["SPF"] !== undefined) rowData[colMap["SPF"]] = spf;
+                  if (colMap["Domain"] !== undefined) rowData[colMap["Domain"]] = dkimDomain || spfDomain;
+                  if (colMap["Header From"] !== undefined) rowData[colMap["Header From"]] = headerFrom;
+                  if (colMap["Count"] !== undefined) rowData[colMap["Count"]] = count;
+                  if (colMap["Email Date"] !== undefined) rowData[colMap["Email Date"]] = msgDate;
+                  if (colMap["Report Date"] !== undefined) rowData[colMap["Report Date"]] = beginDate;
+                  if (colMap["Processed Date"] !== undefined) rowData[colMap["Processed Date"]] = new Date();
+
+                  Logger.log(`        Appending row: ${JSON.stringify(rowData)}`);
+                  sheet.appendRow(rowData);
 
                   // Alert if failed DKIM or SPF exceeds threshold
                   if ((dkim === "fail" || spf === "fail") && parseInt(count) >= thresholdFailures) {
@@ -230,19 +256,21 @@ function getOrCreateSheet(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
-  }
-  // Always check and set headers
-  const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  let needsHeader = false;
-  for (let i = 0; i < headers.length; i++) {
-    if (firstRow[i] !== headers[i]) {
-      needsHeader = true;
-      break;
-    }
-  }
-  if (needsHeader) {
-    sheet.clear();
     sheet.appendRow(headers);
+  } else {
+    // Upgrade headers safely if there is existing data to prevent wiping history
+    const lastCol = sheet.getLastColumn();
+    let existingHeaders = [];
+    if (lastCol > 0) {
+      existingHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    }
+    
+    // Find headers in 'headers' list that are not present in 'existingHeaders'
+    const missingHeaders = headers.filter(h => !existingHeaders.includes(h));
+    if (missingHeaders.length > 0) {
+      // Append missing headers to the end of the first row
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+    }
   }
   // Always ensure header formatting is present for all columns (including new ones)
   var headerCols = sheet.getLastColumn();
@@ -274,7 +302,7 @@ function archiveLastMonthDMARCData(ss, sheetName) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return; // No data
   const headers = data[0];
-  const dateCol = headers.length - 1;
+  const dateCol = headers.indexOf("Processed Date") !== -1 ? headers.indexOf("Processed Date") : headers.length - 1;
   const now = new Date();
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthNum = lastMonth.getMonth();
@@ -330,9 +358,11 @@ function exportMonthlyCSV(ss, sheetName) {
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
 
+  const headers = data[0];
+  const dateCol = headers.indexOf("Processed Date") !== -1 ? headers.indexOf("Processed Date") : headers.length - 1;
   const filteredData = data.filter((row, i) => {
     if (i === 0) return true; // headers
-    const date = new Date(row[row.length - 1]); // last column = Processed Date
+    const date = new Date(row[dateCol]);
     return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
   });
 
@@ -510,8 +540,9 @@ function updateDMARCSummary(ss) {
     const [start, end] = dateRange.split(":");
     const startDate = new Date(start);
     const endDate = new Date(end);
-    const dateCol = data[0].length - 1;
-    data = [data[0]].concat(data.slice(1).filter(function(row) {
+    const headers = data[0];
+    const dateCol = headers.indexOf("Processed Date") !== -1 ? headers.indexOf("Processed Date") : data[0].length - 1;
+    data = [headers].concat(data.slice(1).filter(function(row) {
       const d = new Date(row[dateCol]);
       return d >= startDate && d <= endDate;
     }));
