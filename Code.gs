@@ -1002,21 +1002,73 @@ function setupHelpSheet(ssOrId) {
   let helpSheet = ss.getSheetByName('Help');
   if (!helpSheet) helpSheet = ss.insertSheet('Help');
   helpSheet.clear();
-  helpSheet.getRange(1, 1).setValue('DMARC Reporting Tool - Help & Documentation').setFontWeight('bold').setFontSize(14);
-  helpSheet.getRange(3, 1).setValue('Usage Instructions:').setFontWeight('bold');
-  helpSheet.getRange(4, 1).setValue('1. DMARC reports are processed automatically from your Gmail.');
-  helpSheet.getRange(5, 1).setValue('2. The "DMARC Reports" sheet contains all parsed data.');
-  helpSheet.getRange(6, 1).setValue('3. The "Summary" and "Dashboard" sheets provide visual analytics.');
-  helpSheet.getRange(7, 1).setValue('4. The "Config" sheet lets you set report recipients, retention, and logo.');
-  helpSheet.getRange(8, 1).setValue('5. Data older than the retention period is purged automatically.');
-  helpSheet.getRange(10, 1).setValue('Contact:').setFontWeight('bold');
-  helpSheet.getRange(11, 1).setValue('For support, contact your IT administrator or security team.');
-  helpSheet.getRange(13, 1).setValue('Glossary:').setFontWeight('bold');
-  helpSheet.getRange(14, 1).setValue('DMARC: Domain-based Message Authentication, Reporting & Conformance');
-  helpSheet.getRange(15, 1).setValue('DKIM: DomainKeys Identified Mail');
-  helpSheet.getRange(16, 1).setValue('SPF: Sender Policy Framework');
-  helpSheet.getRange(17, 1).setValue('Disposition: The action taken on a message (none, reject, quarantine)');
-  helpSheet.setColumnWidth(1, 600);
+  
+  // Title Block
+  helpSheet.getRange(1, 1).setValue('DMARC Reporting Tool - Help & Documentation')
+    .setFontWeight('bold').setFontSize(16).setFontColor('#1a73e8').setFontFamily('Arial');
+  
+  // Section: Usage Instructions
+  helpSheet.getRange(3, 1).setValue('Usage Instructions:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
+  const instructions = [
+    ['1. DMARC reports are processed automatically from your Gmail.'],
+    ['2. The "DMARC Reports" sheet contains all parsed data.'],
+    ['3. The "Summary" and "Dashboard" sheets provide visual analytics.'],
+    ['4. The "Config" sheet lets you set report recipients, retention, and label names.'],
+    ['5. Data older than the retention period is purged automatically.'],
+    ['6. Processed emails older than the retention days are cleaned from Gmail automatically.']
+  ];
+  helpSheet.getRange(4, 1, instructions.length, 1).setValues(instructions).setFontFamily('Arial').setFontSize(10);
+  
+  // Section: Column Definitions
+  let startRow = 4 + instructions.length + 2;
+  helpSheet.getRange(startRow, 1).setValue('DMARC Reports - Column Definitions:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
+  
+  const colDefs = [
+    ['Column Header', 'Description'],
+    ['Message ID', 'Unique identifier for the processed email message containing the report.'],
+    ['Reporter', 'The organization that generated and sent the DMARC report (e.g. google.com, yahoo.com).'],
+    ['Source IP', 'The IP address of the mail server that sent the email.'],
+    ['Disposition', 'The DMARC policy action applied to the message (none, quarantine, reject).'],
+    ['DKIM', 'Result of DKIM signature verification (pass, fail, none).'],
+    ['SPF', 'Result of SPF domain validation (pass, fail, none).'],
+    ['Domain', 'The domain identifier parsed from the DKIM/SPF auth results.'],
+    ['Header From', 'The domain name found in the "From:" header of the email message (the domain being authenticated).'],
+    ['Count', 'The number of emails received from the Source IP matching this authentication status during the reporting period.'],
+    ['Email Date', 'The timestamp/date when the DMARC report email was received in your Gmail inbox.'],
+    ['Report Date', 'The starting timestamp/date of the DMARC report\'s window (retrieved from the XML\'s date_range begin tag).'],
+    ['Processed Date', 'The timestamp when the report was parsed and appended to this spreadsheet.'],
+    ['Country', 'The country name associated with the source IP address (enriched via GeoIP lookup).'],
+    ['Failure Reason', 'Plain-language explanation for why the email failed SPF/DKIM validation.']
+  ];
+  
+  helpSheet.getRange(startRow + 1, 1, colDefs.length, 2).setValues(colDefs).setFontFamily('Arial').setFontSize(10);
+  
+  // Format the Column Definitions headers
+  helpSheet.getRange(startRow + 1, 1, 1, 2).setFontWeight('bold').setBackground('#f1f3f4').setBorder(true, true, true, true, null, null, null, null);
+  
+  // Border around definitions
+  helpSheet.getRange(startRow + 1, 1, colDefs.length, 2).setBorder(true, true, true, true, true, true);
+  
+  // Section: Glossary
+  startRow = startRow + colDefs.length + 3;
+  helpSheet.getRange(startRow, 1).setValue('Glossary:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
+  
+  const glossary = [
+    ['Term', 'Definition'],
+    ['DMARC', 'Domain-based Message Authentication, Reporting & Conformance. An email authentication protocol.'],
+    ['DKIM', 'DomainKeys Identified Mail. Cryptographic signature-based email authentication.'],
+    ['SPF', 'Sender Policy Framework. IP list-based email authentication.'],
+    ['Disposition', 'The policy action applied to an email failing authentication: none (log only), quarantine (spam), or reject (block).']
+  ];
+  helpSheet.getRange(startRow + 1, 1, glossary.length, 2).setValues(glossary).setFontFamily('Arial').setFontSize(10);
+  helpSheet.getRange(startRow + 1, 1, 1, 2).setFontWeight('bold').setBackground('#f1f3f4').setBorder(true, true, true, true, null, null, null, null);
+  helpSheet.getRange(startRow + 1, 1, glossary.length, 2).setBorder(true, true, true, true, true, true);
+  
+  // Auto-fit columns
+  helpSheet.autoResizeColumn(1);
+  helpSheet.autoResizeColumn(2);
+  helpSheet.setColumnWidth(1, 200);
+  helpSheet.setColumnWidth(2, 550);
   helpSheet.setTabColor('#FFD700');
 }
 
