@@ -142,6 +142,30 @@ This script is structured to be fully compatible as a Google Apps Script library
 
    *Note: If no spreadsheet ID or object is passed, the functions will automatically fall back to the active spreadsheet of the container script, or the legacy global `spreadsheetId` variable if defined.*
 
+
+### Automating Deployments with Clasp & Git Hooks
+
+If you prefer editing the code locally and want to automate pushing and deploying to Google Apps Script, you can use the preconfigured **clasp** setup:
+
+1. **Install Clasp & Log In:**
+   Make sure you have Node.js installed, then run:
+   ```bash
+   npm install -g @google/clasp
+   clasp login
+   ```
+2. **Enable Google Apps Script API:**
+   Go to [https://script.google.com/home/usersettings](https://script.google.com/home/usersettings) and set **Google Apps Script API** to **ON**.
+3. **Configure your Script ID:**
+   Open [.clasp.json](file:///.clasp.json) and replace `"YOUR_SCRIPT_ID_HERE"` with your actual Google Apps Script ID.
+4. **Git Auto-Deploy Hook:**
+   We have configured a git **post-commit hook** at [.git/hooks/post-commit](file:///.git/hooks/post-commit). 
+   - Every time you run `git commit`, git will automatically run the hook.
+   - The hook will push your updated `Code.gs` and `appsscript.json` to Google Apps Script (`clasp push`).
+   - It will automatically increment the version number and create a new version using your git commit message as the version description (`clasp version`).
+   - It will find your library deployment and update it to point to the new version automatically (`clasp deploy`).
+
+*Note: If clasp is not logged in or you haven't replaced the placeholder Script ID, the hook will fail silently and skip the deploy process, so your standard git commits won't be blocked.*
+
 ---
 
 ## How It Works
