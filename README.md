@@ -195,6 +195,7 @@ This script is structured to be fully compatible as a Google Apps Script library
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
 - **Change the archive folder name:** Edit the value in the Config sheet ("Google Drive Archive Folder Name"). Each spreadsheet will create its own subfolder matching its spreadsheet name inside this parent folder to keep domain reports isolated.
+- **Change the email retention days:** Edit the value in the Config sheet ("Email Retention Days") to specify after how many days processed emails in Gmail should be deleted (defaults to `7` days).
 
 ---
 

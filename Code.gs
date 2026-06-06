@@ -477,14 +477,16 @@ function listSheetNames(ssOrId) {
  */
 function deleteOldProcessedDMARCEmails(ssOrId) {
   let processedLabelName = "DMARC/Processed";
+  let retentionDays = 7;
   try {
     const ss = getSpreadsheet(ssOrId);
     processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
+    retentionDays = parseInt(getConfigValue(ss, "Email Retention Days", 7), 10) || 7;
   } catch (e) {
-    Logger.log("Could not load spreadsheet config for deleteOldProcessedDMARCEmails, using default 'DMARC/Processed' label: " + e.message);
+    Logger.log("Could not load spreadsheet config for deleteOldProcessedDMARCEmails: " + e.message);
   }
 
-  var threads = GmailApp.search(`label:"${processedLabelName}" older_than:7d`);
+  var threads = GmailApp.search(`label:"${processedLabelName}" older_than:${retentionDays}d`);
   threads.forEach(function(thread) {
     thread.moveToTrash();
   });
@@ -739,7 +741,8 @@ function setupConfigSheet(ssOrId) {
     ["DMARC Label Name", "DMARC"],
     ["DMARC Processed Label Name", "DMARC/Processed"],
     ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"],
-    ["Google Drive Archive Folder Name", "DMARC Archives"]
+    ["Google Drive Archive Folder Name", "DMARC Archives"],
+    ["Email Retention Days", 7]
   ];
 
   if (!configSheet) {
