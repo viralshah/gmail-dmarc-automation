@@ -185,8 +185,16 @@ function processDMARCReports(ssOrId) {
                   sheet.appendRow(rowData);
 
                   // Alert if failed DKIM or SPF exceeds threshold
-                  if ((dkim === "fail" || spf === "fail") && parseInt(count) >= thresholdFailures) {
-                    alerts.push(`⚠️ ${orgName} - IP: ${ip} failed DKIM/SPF ${count} times.`);
+                  if ((dkim === "fail" || spf === "fail") && parseInt(count, 10) >= thresholdFailures) {
+                    alerts.push({
+                      domain: headerFrom || dkimDomain || spfDomain || "Unknown",
+                      orgName: orgName,
+                      ip: ip,
+                      count: count,
+                      dkim: dkim,
+                      spf: spf,
+                      date: beginDate ? Utilities.formatDate(beginDate, Session.getScriptTimeZone(), "yyyy-MM-dd") : "Unknown"
+                    });
                   }
                 }
               } catch (e) {
@@ -209,10 +217,93 @@ function processDMARCReports(ssOrId) {
 
     // Send alert email if failures detected
     if (alerts.length > 0) {
+      const sheetUrl = ss.getUrl();
+      const sheetName = ss.getName();
+
+      let plainTextBody = `DMARC Alerts for ${sheetName}:\n\n`;
+      let htmlAlerts = "";
+
+      alerts.forEach(alert => {
+        let failStatus = "";
+        let failBadge = "";
+
+        if (alert.dkim === "fail" && alert.spf === "fail") {
+          failStatus = "Both DKIM & SPF failed";
+          failBadge = `<span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">Both DKIM & SPF Failed</span>`;
+        } else if (alert.dkim === "fail") {
+          failStatus = "DKIM failed (SPF passed/none)";
+          failBadge = `<span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">DKIM Failed</span> <span style="background-color: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">SPF Passed/None</span>`;
+        } else {
+          failStatus = "SPF failed (DKIM passed/none)";
+          failBadge = `<span style="background-color: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">DKIM Passed/None</span> <span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">SPF Failed</span>`;
+        }
+
+        plainTextBody += `⚠️ Domain: ${alert.domain}\n`;
+        plainTextBody += `   Reporter: ${alert.orgName}\n`;
+        plainTextBody += `   Source IP: ${alert.ip}\n`;
+        plainTextBody += `   Failures: ${alert.count} times\n`;
+        plainTextBody += `   Status: ${failStatus}\n`;
+        plainTextBody += `   Report Date: ${alert.date}\n\n`;
+
+        htmlAlerts += `
+          <div style="border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; margin-bottom: 15px; background-color: #ffffff; text-align: left;">
+            <h3 style="margin: 0 0 10px 0; color: #202124; font-size: 16px; font-weight: bold; border-bottom: 1px solid #f1f3f4; padding-bottom: 5px;">
+              Domain: <span style="color: #1a73e8;">${alert.domain}</span>
+            </h3>
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 4px 0; color: #5f6368; width: 120px;"><strong>Reporter:</strong></td>
+                <td style="padding: 4px 0; color: #202124;">${alert.orgName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: #5f6368;"><strong>Source IP:</strong></td>
+                <td style="padding: 4px 0; color: #202124; font-family: monospace;">${alert.ip}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: #5f6368;"><strong>Failure Count:</strong></td>
+                <td style="padding: 4px 0; color: #202124; font-weight: bold;">${alert.count}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: #5f6368;"><strong>Report Date:</strong></td>
+                <td style="padding: 4px 0; color: #202124;">${alert.date}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0 4px 0; color: #5f6368; vertical-align: middle;"><strong>Status:</strong></td>
+                <td style="padding: 8px 0 4px 0; vertical-align: middle;">${failBadge}</td>
+              </tr>
+            </table>
+          </div>
+        `;
+      });
+
+      plainTextBody += `View full analysis here: ${sheetUrl}\n`;
+
+      const htmlBody = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333333; line-height: 1.6;">
+          <div style="background-color: #c5221f; color: #ffffff; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 600;">DMARC Failure Alerts Detected</h2>
+            <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Spreadsheet: <strong>${sheetName}</strong></p>
+          </div>
+          <div style="padding: 20px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px; background-color: #fcfcfc;">
+            <p style="font-size: 15px; margin-top: 0; color: #202124;">The following DMARC failures exceeded the alert threshold of ${thresholdFailures} failures:</p>
+            
+            ${htmlAlerts}
+            
+            <div style="margin-top: 25px; text-align: center;">
+              <a href="${sheetUrl}" style="background-color: #1a73e8; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block; font-size: 14px;">Open DMARC Analysis Sheet</a>
+            </div>
+            <p style="font-size: 12px; color: #5f6368; margin-top: 25px; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+              This alert was generated automatically by the DMARC Analyzer script.
+            </p>
+          </div>
+        </div>
+      `;
+
       MailApp.sendEmail({
         to: Session.getActiveUser().getEmail(),
-        subject: "DMARC Alert: SPF/DKIM Failures Detected",
-        body: alerts.join("\n")
+        subject: `DMARC Alert: SPF/DKIM Failures for ${sheetName}`,
+        body: plainTextBody,
+        htmlBody: htmlBody
       });
     }
 
