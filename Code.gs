@@ -100,7 +100,7 @@ function processDMARCReports(ssOrId) {
     }
 
     // Search Gmail threads with DMARC label and attachments
-    const threads = GmailApp.search(`label:${labelName} has:attachment`);
+    const threads = GmailApp.search(`label:${labelName} has:attachment -label:${processedLabelName}`);
     Logger.log(`Found ${threads.length} threads with label:${labelName} and attachments`);
     const alerts = [];
 
@@ -200,9 +200,9 @@ function processDMARCReports(ssOrId) {
           }
         }
 
-        // Move processed messages to processed label and remove original
+        // Add processed label to processed messages label. This allows for ease of testing instead of moving. 
+        // You can re-run the function by just removing the processed label and preserving the original label.
         thread.addLabel(processedLabel);
-        thread.removeLabel(GmailApp.getUserLabelByName(labelName));
       }
       thread.moveToArchive();
     }
