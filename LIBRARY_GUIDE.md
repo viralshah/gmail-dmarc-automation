@@ -89,7 +89,7 @@ Once you share the **Script ID** and ensure permissions are configured, other us
 The user will write a simple starter script in their own Apps Script editor to trigger the library functions.
 
 ### Standard Setup (Active Spreadsheet)
-If the script is bound to a Google Sheet, they don't even need to pass a spreadsheet ID! The library automatically detects and uses the active sheet:
+If the script is bound to a Google Sheet, they don't even need to pass a spreadsheet ID! The library automatically detects and uses the active sheet (and will load configuration options like report labels directly from the sheet's `Config` tab):
 
 ```javascript
 // Run this once manually to initialize the Config, Help, Dashboard, and Reports tabs.
@@ -118,8 +118,15 @@ If the user is running a standalone script (not bound to a sheet) or wants to up
 function runDailyDMARCProcessor() {
   const targetSpreadsheetId = "1_abc123XYZ_your_external_sheet_id";
   
-  // Explicitly target a spreadsheet
+  // Explicitly target a spreadsheet for processing
   DMARC.autoLabelAndProcessDMARCReports(targetSpreadsheetId);
+}
+
+function runDailyCleanup() {
+  const targetSpreadsheetId = "1_abc123XYZ_your_external_sheet_id";
+  
+  // Explicitly target a spreadsheet for label settings and cleanup
+  DMARC.deleteOldProcessedDMARCEmails(targetSpreadsheetId);
 }
 ```
 

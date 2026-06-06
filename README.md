@@ -169,10 +169,10 @@ This script is structured to be fully compatible as a Google Apps Script library
 
 ## Script Functions (Key)
 
-- `autoLabelDMARCReports()`: Labels new DMARC emails in Gmail.
+- `autoLabelDMARCReports(ssOrId)`: Labels new DMARC emails in Gmail.
 - `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV.
 - `autoLabelAndProcessDMARCReports(ssOrId)`: Runs both labeling and processing in one go (set this as your main daily trigger).
-- `deleteOldProcessedDMARCEmails()`: Deletes processed DMARC emails older than 7 days (set as a daily trigger).
+- `deleteOldProcessedDMARCEmails(ssOrId)`: Deletes processed DMARC emails older than 7 days (set as a daily trigger).
 - `setupConfigSheet(ssOrId)`, `setupHelpSheet(ssOrId)`, `setupDashboardSheet(ssOrId)`: Create and update Config, Help, and Dashboard sheets.
 - `purgeOldDMARCData(ssOrId)`: Purges data older than retention period.
 - `addDrillDownLinksToSummary(ssOrId)`: Adds drill-down hyperlinks in Summary.
@@ -183,11 +183,11 @@ This script is structured to be fully compatible as a Google Apps Script library
 
 ## Customization
 
-- **Change the DMARC label name:** Edit the `labelName` variable in the script if you use a different label.
-- **Change the processed label name:** Edit the `processedLabelName` variable.
+- **Change the DMARC label name:** Edit the value in the Config sheet ("DMARC Label Name").
+- **Change the processed label name:** Edit the value in the Config sheet ("DMARC Processed Label Name").
 - **Change the threshold for DKIM/SPF failure alerts:** Edit the `thresholdFailures` variable.
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
-- **Change report recipients:** Edit the value in the Config sheet ("Report Recipients").
+- **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
 
 ---
 
