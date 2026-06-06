@@ -108,6 +108,42 @@ All incoming DMARC report emails will be labeled as `DMARC` and automatically ar
 
 ---
 
+## Library Usage
+
+This script is structured to be fully compatible as a Google Apps Script library. You can include it in other projects and pass the spreadsheet ID or a `Spreadsheet` object dynamically, bypassing global configuration.
+
+### How to use this script as a Library:
+
+1. **Deploy as a Library:**
+   - In the Apps Script editor of this script, click **Deploy > New deployment**.
+   - Select type **Library**, give it a description (e.g., "DMARC Library"), and click **Deploy**.
+   - Copy the **Library ID** from the deployment details.
+
+2. **Add to another project:**
+   - Open your container Google Sheet or separate project script.
+   - Go to **Extensions > Apps Script**.
+   - Next to **Libraries** on the left sidebar, click the **+** (Add a library) button.
+   - Paste the Library ID, click **Look up**, select the latest version, choose an identifier (e.g., `DMARC`), and click **Add**.
+
+3. **Call functions dynamically:**
+   You can now call the processing function and pass the target spreadsheet ID (or an open `Spreadsheet` object) as an argument:
+
+   ```js
+   function myCustomTrigger() {
+     const mySpreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
+     
+     // Process reports and update sheet dynamically
+     DMARC.processDMARCReports(mySpreadsheetId);
+     
+     // Or auto-label and process
+     DMARC.autoLabelAndProcessDMARCReports(mySpreadsheetId);
+   }
+   ```
+
+   *Note: If no spreadsheet ID or object is passed, the functions will automatically fall back to the active spreadsheet of the container script, or the legacy global `spreadsheetId` variable if defined.*
+
+---
+
 ## How It Works
 
 1. **Labeling:**
@@ -134,14 +170,14 @@ All incoming DMARC report emails will be labeled as `DMARC` and automatically ar
 ## Script Functions (Key)
 
 - `autoLabelDMARCReports()`: Labels new DMARC emails in Gmail.
-- `processDMARCReports()`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV.
-- `autoLabelAndProcessDMARCReports()`: Runs both labeling and processing in one go (set this as your main daily trigger).
+- `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV.
+- `autoLabelAndProcessDMARCReports(ssOrId)`: Runs both labeling and processing in one go (set this as your main daily trigger).
 - `deleteOldProcessedDMARCEmails()`: Deletes processed DMARC emails older than 7 days (set as a daily trigger).
-- `setupConfigSheet()`, `setupHelpSheet()`, `setupDashboardSheet()`: Create and update Config, Help, and Dashboard sheets.
-- `purgeOldDMARCData()`: Purges data older than retention period.
-- `addDrillDownLinksToSummary()`: Adds drill-down hyperlinks in Summary.
-- `sendScheduledDMARCReport()`: Exports Summary as PDF and emails to recipients.
-- `applyBranding()`: Applies font/color styling (no logo logic).
+- `setupConfigSheet(ssOrId)`, `setupHelpSheet(ssOrId)`, `setupDashboardSheet(ssOrId)`: Create and update Config, Help, and Dashboard sheets.
+- `purgeOldDMARCData(ssOrId)`: Purges data older than retention period.
+- `addDrillDownLinksToSummary(ssOrId)`: Adds drill-down hyperlinks in Summary.
+- `sendScheduledDMARCReport(ssOrId)`: Exports Summary as PDF and emails to recipients.
+- `applyBranding(ssOrId)`: Applies font/color styling (no logo logic).
 
 ---
 

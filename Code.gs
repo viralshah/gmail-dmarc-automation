@@ -1,28 +1,58 @@
 const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
 
 /**
+ * Helper to get a Spreadsheet object.
+ * Resolves in the following priority order:
+ * 1. An explicitly passed Spreadsheet object or spreadsheet ID string.
+ * 2. The global `spreadsheetId` variable (if set and not the default placeholder).
+ * 3. The active spreadsheet of the container script.
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
+ * @return {SpreadsheetApp.Spreadsheet}
+ */
+function getSpreadsheet(ssOrId) {
+  if (ssOrId) {
+    if (typeof ssOrId === 'string') {
+      return SpreadsheetApp.openById(ssOrId);
+    }
+    return ssOrId;
+  }
+  if (typeof spreadsheetId !== 'undefined' && spreadsheetId && spreadsheetId !== "YOUR_SPREADSHEET_ID_HERE") {
+    return SpreadsheetApp.openById(spreadsheetId);
+  }
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  if (!active) {
+    throw new Error("No active spreadsheet found. Please provide a Spreadsheet ID.");
+  }
+  return active;
+}
+
+/**
  * Main function: Process DMARC reports from Gmail, parse attachments,
  * append data to spreadsheet, update summary with charts and colors,
  * and export monthly CSV archive.
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function processDMARCReports() {
+function processDMARCReports(ssOrId) {
   const labelName = "DMARC";
   const processedLabelName = "DMARC/Processed";
   const sheetName = "DMARC Reports";
   const thresholdFailures = 3;
 
   try {
-    // --- Always ensure all setup and branding is up to date ---
-    setupConfigSheet(); // Ensures Config exists and is correct
-    setupHelpSheet();   // Ensures Help tab exists
-    setupDashboardSheet(); // Ensures Dashboard exists and is up to date
-
-    const processedLabel = getOrCreateLabel(processedLabelName);
-    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const ss = getSpreadsheet(ssOrId);
     Logger.log("Spreadsheet loaded: " + (ss ? "yes" : "no"));
     if (!ss) {
       throw new Error("Could not open spreadsheet. Check spreadsheetId and permissions.");
     }
+
+    // --- Always ensure all setup and branding is up to date ---
+    setupConfigSheet(ss); // Ensures Config exists and is correct
+    setupHelpSheet(ss);   // Ensures Help tab exists
+    setupDashboardSheet(ss); // Ensures Dashboard exists and is up to date
+
+    const processedLabel = getOrCreateLabel(processedLabelName);
 
     // Automatically archive last month's data before processing new reports
     archiveLastMonthDMARCData(ss, sheetName);
@@ -146,19 +176,19 @@ function processDMARCReports() {
     exportMonthlyCSV(ss, sheetName);
 
     // Enrich DMARC Reports with Country and Failure Reason columns
-    enrichDMARCReportsWithGeoAndReason();
+    enrichDMARCReportsWithGeoAndReason(ss);
 
     // Purge old data according to Config
-    purgeOldDMARCData();
+    purgeOldDMARCData(ss);
 
     // Add drill-down links to summary
-    addDrillDownLinksToSummary();
+    addDrillDownLinksToSummary(ss);
 
     // --- Always apply branding and logo automatically ---
-    applyBranding();
+    applyBranding(ss);
 
     // --- Scheduled report (if on trigger) ---
-    sendScheduledDMARCReport();
+    sendScheduledDMARCReport(ss);
 
   } catch (err) {
     Logger.log("Error in processDMARCReports: " + err);
@@ -340,17 +370,21 @@ function autoLabelDMARCReports() {
 /**
  * Combined function: Auto-label and process DMARC reports in one go.
  * Run this function on a daily (or more frequent) trigger for full automation.
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function autoLabelAndProcessDMARCReports() {
+function autoLabelAndProcessDMARCReports(ssOrId) {
   autoLabelDMARCReports();
-  processDMARCReports();
+  processDMARCReports(ssOrId);
 }
 
 /**
  * List all sheet names in the active spreadsheet
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function listSheetNames() {
-  var ss = SpreadsheetApp.openById(spreadsheetId);
+function listSheetNames(ssOrId) {
+  var ss = getSpreadsheet(ssOrId);
   var sheets = ss.getSheets();
   var names = sheets.map(function(sheet) { return sheet.getName(); });
   Logger.log(names);
@@ -575,8 +609,13 @@ function updateDMARCSummary(ss) {
 /**
  * Add drill-down hyperlinks in the Summary sheet to jump to filtered data in DMARC Reports
  */
-function addDrillDownLinksToSummary() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+/**
+ * Add drill-down hyperlinks in the Summary sheet to jump to filtered data in DMARC Reports
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
+ */
+function addDrillDownLinksToSummary(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   const summary = ss.getSheetByName('Summary');
   const reports = ss.getSheetByName('DMARC Reports');
   if (!summary || !reports) return;
@@ -598,9 +637,11 @@ function addDrillDownLinksToSummary() {
 
 /**
  * Create a Config sheet for settings (email recipients, retention, etc.)
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function setupConfigSheet() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function setupConfigSheet(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   let configSheet = ss.getSheetByName('Config');
   if (!configSheet) {
     configSheet = ss.insertSheet('Config');
@@ -616,9 +657,11 @@ function setupConfigSheet() {
 
 /**
  * Purge/archive DMARC data older than the retention period set in Config sheet
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function purgeOldDMARCData() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function purgeOldDMARCData(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   const configSheet = ss.getSheetByName('Config');
   if (!configSheet) return;
   const retentionMonths = parseInt(configSheet.getRange(3, 2).getValue(), 10) || 12;
@@ -638,9 +681,14 @@ function purgeOldDMARCData() {
   }
 }
 
+/**
+ * Enrich DMARC Reports with Country and Failure Reason columns
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
+ */
 // --- Add IP Country and Failure Reason columns to DMARC Reports sheet ---
-function enrichDMARCReportsWithGeoAndReason() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function enrichDMARCReportsWithGeoAndReason(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   const sheet = ss.getSheetByName("DMARC Reports");
   if (!sheet) return;
   const data = sheet.getDataRange().getValues();
@@ -726,9 +774,11 @@ function enrichDMARCReportsWithGeoAndReason() {
 
 /**
  * Add a Documentation/Help sheet with usage, contact, and glossary
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function setupHelpSheet() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function setupHelpSheet(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   let helpSheet = ss.getSheetByName('Help');
   if (!helpSheet) helpSheet = ss.insertSheet('Help');
   helpSheet.clear();
@@ -752,9 +802,11 @@ function setupHelpSheet() {
 
 /**
  * Add a Dashboard sheet with high-level KPIs and trendlines
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function setupDashboardSheet() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function setupDashboardSheet(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   let dashboard = ss.getSheetByName('Dashboard');
   if (!dashboard) dashboard = ss.insertSheet('Dashboard');
   dashboard.clear();
@@ -818,8 +870,13 @@ function setupDashboardSheet() {
   dashboard.setFrozenRows(1);
 }
 
-function applyBranding() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+/**
+ * Apply styling/branding to Dashboard and Summary sheets
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
+ */
+function applyBranding(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   const dashboard = ss.getSheetByName('Dashboard');
   const summary = ss.getSheetByName('Summary');
   // Branding for Dashboard
@@ -846,16 +903,18 @@ function applyBranding() {
 
 /**
  * Scheduled email report: send PDF summary to recipients from Config
+ * 
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
  */
-function sendScheduledDMARCReport() {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
+function sendScheduledDMARCReport(ssOrId) {
+  const ss = getSpreadsheet(ssOrId);
   const configSheet = ss.getSheetByName('Config');
   if (!configSheet) return;
   const recipients = configSheet.getRange(2, 2).getValue();
   const summarySheet = ss.getSheetByName('Summary');
   if (!summarySheet) return;
   // Export summary as PDF
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=pdf&gid=${summarySheet.getSheetId()}&portrait=false&size=A4&fitw=true&sheetnames=false&printtitle=false&pagenumbers=false&gridlines=false&fzr=false`;
+  const url = `https://docs.google.com/spreadsheets/d/${ss.getId()}/export?format=pdf&gid=${summarySheet.getSheetId()}&portrait=false&size=A4&fitw=true&sheetnames=false&printtitle=false&pagenumbers=false&gridlines=false&fzr=false`;
   const token = ScriptApp.getOAuthToken();
   const response = UrlFetchApp.fetch(url, {
     headers: { Authorization: 'Bearer ' + token },
