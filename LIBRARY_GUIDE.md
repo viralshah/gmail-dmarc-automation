@@ -32,7 +32,7 @@ To make your code available as a library, you must create a versioned **Deployme
 3. Click the gear icon (**Select type**) next to "Configuration" and select **Library**.
 4. Enter a description (e.g., `DMARC Analyzer Library v1.0.0`).
 5. Click **Deploy**.
-6. Copy the **Script ID** (also called the Library ID) shown in the deployment details. You will need to share this ID with your users.
+6. Copy the **Script ID** (also called the Library ID) shown in the project settings page. You can share this ID with your users or they'll be able to look it up themselves once the project is shared with them.
    - *Example format:* `1x2y3z..._A-B-C...`
 
 > [!TIP]
