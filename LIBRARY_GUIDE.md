@@ -142,6 +142,34 @@ function runDailyCleanup() {
 > **Separation of Processing and Emailing:**
 > You can change the PDF report email frequency (e.g., from `Daily` to `Weekly`, `Fortnightly`, or `Monthly`) directly inside the `Config` tab. The daily trigger will continue to parse incoming emails and update the spreadsheets and charts every day, but it will only dispatch the PDF summary report emails based on the configured frequency.
 
+
+### Interactive Summary Filtering (Control Cells)
+
+The `Summary` sheet contains control cells that allow you to filter reports on the fly:
+- **`C2` (Date Range):** Enter a range like `2026-05-01:2026-05-30` to filter data.
+- **`C3` (Aggregate All Months):** Type `ALL` to aggregate metrics across all historical sheets, or leave blank to only show the current month.
+
+To make these controls update the summary automatically when edited, add the following `onEdit(e)` function in your container spreadsheet's Apps Script:
+
+```javascript
+/**
+ * Automatically update the DMARC Summary sheet when control cells (C2, C3) are modified
+ */
+function onEdit(e) {
+  if (!e) return;
+  const range = e.range;
+  const sheet = range.getSheet();
+  if (sheet.getName() === "Summary") {
+    const row = range.getRow();
+    const col = range.getColumn();
+    // C2 is row 2 col 3; C3 is row 3 col 3
+    if ((row === 2 || row === 3) && col === 3) {
+      DMARC.updateDMARCSummary(sheet.getParent());
+    }
+  }
+}
+```
+
 ---
 
 ## Multi-Domain (Multi-Tenant) Archiving & Setup

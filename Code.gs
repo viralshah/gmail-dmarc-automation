@@ -496,6 +496,23 @@ function onOpen() {
 }
 
 /**
+ * Automatically update the DMARC Summary sheet when control cells (C2, C3) are modified
+ */
+function onEdit(e) {
+  if (!e) return;
+  const range = e.range;
+  const sheet = range.getSheet();
+  if (sheet.getName() === "Summary") {
+    const row = range.getRow();
+    const col = range.getColumn();
+    // C2 is row 2 col 3; C3 is row 3 col 3
+    if ((row === 2 || row === 3) && col === 3) {
+      updateDMARCSummary(sheet.getParent());
+    }
+  }
+}
+
+/**
  * Helper to force send the scheduled report from the spreadsheet UI menu.
  */
 function forceSendScheduledDMARCReport() {
@@ -612,18 +629,22 @@ function getAllDMARCData(ss, mainSheetName) {
 function updateDMARCSummary(ss) {
   if (!ss) return;
   let summarySheet = ss.getSheetByName("Summary");
+  let dateRange = "";
+  let useAll = "";
+
   if (!summarySheet) {
     summarySheet = ss.insertSheet("Summary");
   } else {
+    // Read the filter control values BEFORE clearing the sheet
+    dateRange = summarySheet.getRange("C2").getValue();
+    useAll = summarySheet.getRange("C3").getValue();
+
     summarySheet.clear();
     const charts = summarySheet.getCharts();
     charts.forEach(function(chart) { summarySheet.removeChart(chart); });
   }
 
   // --- Data Preparation ---
-  // Date range filter (optional)
-  let dateRange = summarySheet.getRange("C2").getValue();
-  let useAll = summarySheet.getRange("C3").getValue();
   let data;
   if (useAll && useAll.toString().toUpperCase() === 'ALL') {
     data = getAllDMARCData(ss, "DMARC Reports");
@@ -695,9 +716,9 @@ function updateDMARCSummary(ss) {
   // Section: Controls (move to top left, but do not display as data)
   summarySheet.getRange("B1").setValue("Controls:").setFontWeight("bold").setFontSize(11);
   summarySheet.getRange("B2").setValue("Date Range (YYYY-MM-DD:YYYY-MM-DD)").setFontWeight("bold").setBackground("#e3e3e3");
-  summarySheet.getRange("C2").setValue("").setNote("Enter a date range here, e.g. 2025-05-01:2025-05-30. Leave blank for all dates.");
+  summarySheet.getRange("C2").setValue(dateRange || "").setNote("Enter a date range here, e.g. 2025-05-01:2025-05-30. Leave blank for all dates.");
   summarySheet.getRange("B3").setValue("Type 'ALL' to aggregate all months").setFontWeight("bold").setBackground("#e3e3e3");
-  summarySheet.getRange("C3").setValue("").setNote("Type ALL to aggregate all months of data, or leave blank for current month only.");
+  summarySheet.getRange("C3").setValue(useAll || "").setNote("Type ALL to aggregate all months of data, or leave blank for current month only.");
   summarySheet.getRange("B1:C3").setBorder(true, true, true, true, true, true).setBackground("#f9f9f9");
 
   // Section: Reporting Org Table
