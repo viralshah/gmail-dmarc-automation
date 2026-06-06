@@ -156,7 +156,14 @@ If you prefer editing the code locally and want to automate pushing and deployin
 2. **Enable Google Apps Script API:**
    Go to [https://script.google.com/home/usersettings](https://script.google.com/home/usersettings) and set **Google Apps Script API** to **ON**.
 3. **Configure your Script ID:**
-   Open [.clasp.json](file:///.clasp.json) and replace `"YOUR_SCRIPT_ID_HERE"` with your actual Google Apps Script ID.
+   Create a `.clasp.json` file in the root directory (this file is ignored by git so it won't be committed). It should look like this:
+   ```json
+   {
+     "scriptId": "YOUR_SCRIPT_ID_HERE",
+     "rootDir": "./"
+   }
+   ```
+   Replace `"YOUR_SCRIPT_ID_HERE"` with your actual Google Apps Script project's Script ID (found under **Project Settings** > **IDs** > **Script ID** in the Apps Script editor).
 4. **Git Auto-Deploy Hook:**
    We have configured a git **post-commit hook** at [.git/hooks/post-commit](file:///.git/hooks/post-commit). 
    - Every time you run `git commit`, git will automatically run the hook.
