@@ -165,7 +165,12 @@ If you prefer editing the code locally and want to automate pushing and deployin
    ```
    Replace `"YOUR_SCRIPT_ID_HERE"` with your actual Google Apps Script project's Script ID (found under **Project Settings** > **IDs** > **Script ID** in the Apps Script editor).
 4. **Git Auto-Deploy Hook:**
-   We have configured a git **post-commit hook** at [.git/hooks/post-commit](file:///.git/hooks/post-commit). 
+   We have included a git **post-commit hook** in the repository under the [.githooks/post-commit](file:///.githooks/post-commit) file.
+   - To activate the hook for your local repository, configure Git to use the `.githooks` directory:
+     ```bash
+     git config core.hooksPath .githooks
+     chmod +x .githooks/post-commit
+     ```
    - Every time you run `git commit`, git will automatically run the hook.
    - The hook will push your updated `Code.gs` and `appsscript.json` to Google Apps Script (`clasp push`).
    - It will automatically increment the version number and create a new version using your git commit message as the version description (`clasp version`).

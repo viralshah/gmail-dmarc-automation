@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# Exit if any command fails
+set -e
+
+# Make sure we run in the repository root directory
+cd "$(git rev-parse --show-toplevel)"
+
+# Only run clasp operations if Code.gs or appsscript.json changed in this commit
+if ! git diff-tree --no-commit-id --name-only -r HEAD | grep -qE "^(Code\.gs|appsscript\.json)$"; then
+  exit 0
+fi
+
+echo ""
+echo "======================================================================"
+echo "==> Post-commit hook: Syncing and deploying to Google Apps Script..."
+echo "======================================================================"
+
+# Check if .clasp.json is configured with a valid Script ID
+if [ ! -f ".clasp.json" ] || grep -q "YOUR_SCRIPT_ID_HERE" ".clasp.json"; then
+  echo "Notice: clasp script ID is not set or configured. Skipping Apps Script push & deploy."
+  exit 0
+fi
+
+# Check if clasp CLI is installed and configured
+if ! command -v clasp &>/dev/null; then
+  echo "Notice: clasp command line tool is not installed. Skipping Apps Script push & deploy."
+  exit 0
+fi
+
+# Check if clasp status runs successfully (checks if logged in and project is valid)
+if ! clasp status &>/dev/null; then
+  echo "Notice: clasp is not logged in or cannot access the script project. Skipping Apps Script push & deploy."
+  exit 0
+fi
+
+# Push changes
+echo "==> Pushing changes to Apps Script..."
+clasp push
+
+# Create a new version and parse the version number
+echo "==> Creating a new version..."
+COMMIT_MSG=$(git log -1 --pretty=%B | tr -d '\n')
+VERSION_OUTPUT=$(clasp version "$COMMIT_MSG")
+echo "$VERSION_OUTPUT"
+
+# Extract version number (e.g., "Created version 4." -> "4")
+VERSION_NUM=$(echo "$VERSION_OUTPUT" | grep -oE "version [0-9]+" | awk '{print $2}')
+
+if [ -z "$VERSION_NUM" ]; then
+  echo "Error: Could not parse version number from clasp output."
+  exit 1
+fi
+
+# Find the library deployment ID from clasp deployments
+echo "==> Looking for existing deployments..."
+DEPLOYMENTS_OUTPUT=$(clasp deployments)
+# Filter for lines starting with '-' (the actual deployment items)
+DEPLOYMENT_ID=$(echo "$DEPLOYMENTS_OUTPUT" | grep "^-" | grep -i "library" | head -n 1 | awk '{print $2}')
+
+if [ -z "$DEPLOYMENT_ID" ]; then
+  # Fallback to the first available non-HEAD deployment
+  DEPLOYMENT_ID=$(echo "$DEPLOYMENTS_OUTPUT" | grep "^-" | grep -v "@HEAD" | head -n 1 | awk '{print $2}')
+fi
+
+if [ -z "$DEPLOYMENT_ID" ]; then
+  # Absolute fallback to first available deployment
+  DEPLOYMENT_ID=$(echo "$DEPLOYMENTS_OUTPUT" | grep "^-" | head -n 1 | awk '{print $2}')
+fi
+
+if [ -n "$DEPLOYMENT_ID" ]; then
+  echo "==> Updating deployment $DEPLOYMENT_ID to version $VERSION_NUM..."
+  clasp deploy --deploymentId "$DEPLOYMENT_ID" --versionNumber "$VERSION_NUM" --description "$COMMIT_MSG"
+else
+  echo "==> No existing deployment found. Creating a new deployment for version $VERSION_NUM..."
+  clasp deploy --versionNumber "$VERSION_NUM" --description "$COMMIT_MSG"
+fi
+
+echo "==> Apps Script deployment successful!"
+echo "======================================================================"
+echo ""
