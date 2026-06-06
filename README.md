@@ -97,14 +97,14 @@ All incoming DMARC report emails will be labeled as `DMARC` and automatically ar
 ### 4. Set Up Triggers
 - In the Apps Script editor, click the clock icon (Triggers) in the left sidebar.
 - Add two time-driven triggers:
-  1. **autoLabelAndProcessDMARCReports** (daily):
-     - Function: `autoLabelAndProcessDMARCReports`
-     - Event source: Time-driven
-     - Type: Day timer (choose a time)
+  1. **DMARC Processing** (daily):
+     - **Function:** Select `processDMARCReports` if you set up the recommended Gmail filter in Step 3. If you did *not* set up the Gmail filter and want the script to search and label the emails for you, select `autoLabelAndProcessDMARCReports` instead.
+     - **Event source:** Time-driven
+     - **Type:** Day timer (choose a time)
   2. **deleteOldProcessedDMARCEmails** (daily):
-     - Function: `deleteOldProcessedDMARCEmails`
-     - Event source: Time-driven
-     - Type: Day timer (choose a time)
+     - **Function:** `deleteOldProcessedDMARCEmails`
+     - **Event source:** Time-driven
+     - **Type:** Day timer (choose a time)
 
 ---
 
@@ -170,8 +170,8 @@ This script is structured to be fully compatible as a Google Apps Script library
 ## Script Functions (Key)
 
 - `autoLabelDMARCReports(ssOrId)`: Labels new DMARC emails in Gmail.
-- `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV.
-- `autoLabelAndProcessDMARCReports(ssOrId)`: Runs both labeling and processing in one go (set this as your main daily trigger).
+- `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV. **(Recommended main trigger if you set up the Gmail filter)**.
+- `autoLabelAndProcessDMARCReports(ssOrId)`: Runs both labeling and processing in one go (only use as your main trigger if you did not set up the Gmail filter).
 - `deleteOldProcessedDMARCEmails(ssOrId)`: Deletes processed DMARC emails older than 7 days (set as a daily trigger).
 - `setupConfigSheet(ssOrId)`, `setupHelpSheet(ssOrId)`, `setupDashboardSheet(ssOrId)`: Create and update Config, Help, and Dashboard sheets.
 - `purgeOldDMARCData(ssOrId)`: Purges data older than retention period.

@@ -101,8 +101,12 @@ function setupDMARC() {
 
 // Main daily trigger function
 function runDailyDMARCProcessor() {
-  // Pulls DMARC emails from Gmail, parses, aggregates, and exports
-  DMARC.autoLabelAndProcessDMARCReports();
+  // Recommended: Processes DMARC emails that are already labeled (e.g. via Gmail filter)
+  DMARC.processDMARCReports();
+
+  // Alternative: Searches Gmail, applies the label, and then processes reports in one go
+  // (Only use this if you did NOT set up the recommended Gmail filter)
+  // DMARC.autoLabelAndProcessDMARCReports();
 }
 
 // Clean up trigger function (removes processed labels from Gmail threads older than 7 days)
@@ -118,8 +122,12 @@ If the user is running a standalone script (not bound to a sheet) or wants to up
 function runDailyDMARCProcessor() {
   const targetSpreadsheetId = "1_abc123XYZ_your_external_sheet_id";
   
-  // Explicitly target a spreadsheet for processing
-  DMARC.autoLabelAndProcessDMARCReports(targetSpreadsheetId);
+  // Recommended: Processes DMARC emails that are already labeled (e.g. via Gmail filter)
+  DMARC.processDMARCReports(targetSpreadsheetId);
+
+  // Alternative: Searches Gmail, applies the label, and then processes reports in one go
+  // (Only use this if you did NOT set up the recommended Gmail filter)
+  // DMARC.autoLabelAndProcessDMARCReports(targetSpreadsheetId);
 }
 
 function runDailyCleanup() {
