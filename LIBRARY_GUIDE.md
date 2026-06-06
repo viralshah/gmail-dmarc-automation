@@ -92,6 +92,9 @@ The user will write a simple starter script in their own Apps Script editor to t
 If the script is bound to a Google Sheet, they don't even need to pass a spreadsheet ID! The library automatically detects and uses the active sheet (and will load configuration options like report labels directly from the sheet's `Config` tab):
 
 ```javascript
+// =========================================================================
+// 1. INITIALIZATION & SETUP
+// =========================================================================
 // Run this once manually to initialize the Config, Help, Dashboard, and Reports tabs.
 function setupDMARC() {
   DMARC.setupConfigSheet();
@@ -99,7 +102,10 @@ function setupDMARC() {
   DMARC.setupDashboardSheet();
 }
 
-// Main daily trigger function
+// =========================================================================
+// 2. DAILY AUTOMATION TRIGGERS (Configure in Triggers Dashboard)
+// =========================================================================
+// Main daily trigger function: pulls DMARC emails, parses, aggregates, and exports.
 function runDailyDMARCProcessor() {
   // Recommended: Processes DMARC emails that are already labeled (e.g. via Gmail filter)
   DMARC.processDMARCReports();
@@ -109,9 +115,18 @@ function runDailyDMARCProcessor() {
   // DMARC.autoLabelAndProcessDMARCReports();
 }
 
-// Clean up trigger function (removes processed labels from Gmail threads older than 7 days)
+// Clean up trigger function: removes processed labels from Gmail threads older than retention days.
 function runDailyCleanup() {
   DMARC.deleteOldProcessedDMARCEmails();
+}
+
+// =========================================================================
+// 3. INTERACTIVE SUMMARY FILTERING (Simple Edit Trigger)
+// =========================================================================
+// Automatically updates the Summary sheet when control cells (C2, C3) are modified.
+// Because it is named exactly 'onEdit', it runs automatically as a simple trigger on edits.
+function onEdit(e) {
+  DMARC.onEdit(e);
 }
 ```
 
@@ -121,19 +136,11 @@ If the user is running a standalone script (not bound to a sheet) or wants to up
 ```javascript
 function runDailyDMARCProcessor() {
   const targetSpreadsheetId = "1_abc123XYZ_your_external_sheet_id";
-  
-  // Recommended: Processes DMARC emails that are already labeled (e.g. via Gmail filter)
   DMARC.processDMARCReports(targetSpreadsheetId);
-
-  // Alternative: Searches Gmail, applies the label, and then processes reports in one go
-  // (Only use this if you did NOT set up the recommended Gmail filter)
-  // DMARC.autoLabelAndProcessDMARCReports(targetSpreadsheetId);
 }
 
 function runDailyCleanup() {
   const targetSpreadsheetId = "1_abc123XYZ_your_external_sheet_id";
-  
-  // Explicitly target a spreadsheet for label settings and cleanup
   DMARC.deleteOldProcessedDMARCEmails(targetSpreadsheetId);
 }
 ```
@@ -142,6 +149,7 @@ function runDailyCleanup() {
 > **Separation of Processing and Emailing:**
 > You can change the PDF report email frequency (e.g., from `Daily` to `Weekly`, `Fortnightly`, or `Monthly`) directly inside the `Config` tab. The daily trigger will continue to parse incoming emails and update the spreadsheets and charts every day, but it will only dispatch the PDF summary report emails based on the configured frequency.
 
+---
 
 ### Interactive Summary Filtering (Control Cells)
 
@@ -149,23 +157,11 @@ The `Summary` sheet contains control cells that allow you to filter reports on t
 - **`C2` (Date Range):** Enter a range like `2026-05-01:2026-05-30` to filter data.
 - **`C3` (Aggregate All Months):** Type `ALL` to aggregate metrics across all historical sheets, or leave blank to only show the current month.
 
-To make these controls update the summary automatically when edited, you must configure an edit trigger in your container spreadsheet. You can do this in two ways:
+Using the `onEdit(e)` function in the standard code block above, edits to these cells will automatically trigger updates via the library.
 
-#### Option A: Simple Trigger (Easiest, No configuration required)
-Simply add the following function to your container spreadsheet's Apps Script editor:
-```javascript
-/**
- * Simple edit trigger that delegates to the DMARC library
- */
-function onEdit(e) {
-  DMARC.onEdit(e);
-}
-```
-*Note: Because this function is named exactly `onEdit`, Apps Script automatically runs it whenever a cell is edited. No manual setup is needed in the dashboard.*
-
-#### Option B: Installable Trigger (Configured via Dashboard)
-If you prefer setting up an installable trigger (for example, if you want it to run as a specific user with full script execution permissions):
-1. In your container spreadsheet's Apps Script project, add a custom function to delegate to the library:
+#### Option: Installable Trigger (Configured via Dashboard)
+If you prefer setting up an installable trigger (for example, if you want it to run as a specific user with full script execution permissions rather than as the active user editing the sheet):
+1. In your container spreadsheet's Apps Script project, define a custom function to delegate to the library:
    ```javascript
    function handleEdit(e) {
      DMARC.onEdit(e);
