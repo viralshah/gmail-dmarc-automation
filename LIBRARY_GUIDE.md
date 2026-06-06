@@ -149,26 +149,36 @@ The `Summary` sheet contains control cells that allow you to filter reports on t
 - **`C2` (Date Range):** Enter a range like `2026-05-01:2026-05-30` to filter data.
 - **`C3` (Aggregate All Months):** Type `ALL` to aggregate metrics across all historical sheets, or leave blank to only show the current month.
 
-To make these controls update the summary automatically when edited, add the following `onEdit(e)` function in your container spreadsheet's Apps Script:
+To make these controls update the summary automatically when edited, you must configure an edit trigger in your container spreadsheet. You can do this in two ways:
 
+#### Option A: Simple Trigger (Easiest, No configuration required)
+Simply add the following function to your container spreadsheet's Apps Script editor:
 ```javascript
 /**
- * Automatically update the DMARC Summary sheet when control cells (C2, C3) are modified
+ * Simple edit trigger that delegates to the DMARC library
  */
 function onEdit(e) {
-  if (!e) return;
-  const range = e.range;
-  const sheet = range.getSheet();
-  if (sheet.getName() === "Summary") {
-    const row = range.getRow();
-    const col = range.getColumn();
-    // C2 is row 2 col 3; C3 is row 3 col 3
-    if ((row === 2 || row === 3) && col === 3) {
-      DMARC.updateDMARCSummary(sheet.getParent());
-    }
-  }
+  DMARC.onEdit(e);
 }
 ```
+*Note: Because this function is named exactly `onEdit`, Apps Script automatically runs it whenever a cell is edited. No manual setup is needed in the dashboard.*
+
+#### Option B: Installable Trigger (Configured via Dashboard)
+If you prefer setting up an installable trigger (for example, if you want it to run as a specific user with full script execution permissions):
+1. In your container spreadsheet's Apps Script project, add a custom function to delegate to the library:
+   ```javascript
+   function handleEdit(e) {
+     DMARC.onEdit(e);
+   }
+   ```
+2. In the Apps Script editor sidebar, click the clock icon (**Triggers**).
+3. Click the **+ Add Trigger** button in the bottom right corner.
+4. Configure the settings:
+   - **Choose which function to run:** `handleEdit`
+   - **Choose which deployment to run:** `Head`
+   - **Select event source:** `From spreadsheet`
+   - **Select event type:** `On edit`
+5. Click **Save** and authorize the trigger when prompted.
 
 ---
 
