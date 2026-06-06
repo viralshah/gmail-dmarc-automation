@@ -153,6 +153,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
    npm install -g @google/clasp
    clasp login
    ```
+   *Note: If you ever want to log out and clean up your local clasp login credentials later, run `clasp logout`.*
 2. **Enable Google Apps Script API:**
    Go to [https://script.google.com/home/usersettings](https://script.google.com/home/usersettings) and set **Google Apps Script API** to **ON**.
 3. **Configure your Script ID:**
