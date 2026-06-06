@@ -644,22 +644,37 @@ function updateDMARCSummary(ss) {
     charts.forEach(function(chart) { summarySheet.removeChart(chart); });
   }
 
+  // --- Write Controls Block First ---
+  summarySheet.getRange("B1").setValue("Controls:").setFontWeight("bold").setFontSize(11);
+  summarySheet.getRange("B2").setValue("Date Range (YYYY-MM-DD:YYYY-MM-DD)").setFontWeight("bold").setBackground("#e3e3e3");
+  summarySheet.getRange("C2").setValue(dateRange || "").setNote("Enter a date range here, e.g. 2025-05-01:2025-05-30. Leave blank for all dates.");
+  summarySheet.getRange("B3").setValue("Type 'ALL' to aggregate all months").setFontWeight("bold").setBackground("#e3e3e3");
+  summarySheet.getRange("C3").setValue(useAll || "").setNote("Type ALL to aggregate all months of data, or leave blank for current month only.");
+  summarySheet.getRange("B1:C3").setBorder(true, true, true, true, true, true).setBackground("#f9f9f9");
+
   // --- Data Preparation ---
   let data;
+  const rawSheet = ss.getSheetByName("DMARC Reports");
+  if (!rawSheet) {
+    summarySheet.getRange("B5").setValue("No 'DMARC Reports' sheet found. Please run setup first.").setFontStyle("italic");
+    formatSummarySheetStyles(summarySheet, ss);
+    return;
+  }
+
   if (useAll && useAll.toString().toUpperCase() === 'ALL') {
     data = getAllDMARCData(ss, "DMARC Reports");
   } else {
-    const rawSheet = ss.getSheetByName("DMARC Reports");
-    if (!rawSheet) return;
     data = rawSheet.getDataRange().getValues();
   }
+
   if (!data || data.length < 2) {
-    summarySheet.getRange("B5:C5").setValues([["Reporting Org", "Report Count"]]);
-    summarySheet.getRange("B5:C5").setBackground("#b7e1cd").setFontWeight("bold");
-    summarySheet.getRange("C2").setValue("No DMARC data available");
+    summarySheet.getRange("B5").setValue("No DMARC data available. Run the processor to pull reports.").setFontStyle("italic");
+    formatSummarySheetStyles(summarySheet, ss);
     return;
   }
+
   // Filter by date range if set
+  let isFiltered = false;
   if (dateRange && typeof dateRange === "string" && dateRange.includes(":")) {
     const [start, end] = dateRange.split(":");
     const startDate = new Date(start);
@@ -670,6 +685,16 @@ function updateDMARCSummary(ss) {
       const d = new Date(row[dateCol]);
       return d >= startDate && d <= endDate;
     }));
+    isFiltered = true;
+  }
+
+  if (data.length < 2) {
+    const msg = isFiltered 
+      ? "No DMARC data found matching the date range: " + dateRange
+      : "No DMARC data available.";
+    summarySheet.getRange("B5").setValue(msg).setFontStyle("italic");
+    formatSummarySheetStyles(summarySheet, ss);
+    return;
   }
   const headers = data[0];
   const orgIndex = headers.indexOf("Reporter");
@@ -713,13 +738,6 @@ function updateDMARCSummary(ss) {
   }
 
   // --- Professional Summary Layout ---
-  // Section: Controls (move to top left, but do not display as data)
-  summarySheet.getRange("B1").setValue("Controls:").setFontWeight("bold").setFontSize(11);
-  summarySheet.getRange("B2").setValue("Date Range (YYYY-MM-DD:YYYY-MM-DD)").setFontWeight("bold").setBackground("#e3e3e3");
-  summarySheet.getRange("C2").setValue(dateRange || "").setNote("Enter a date range here, e.g. 2025-05-01:2025-05-30. Leave blank for all dates.");
-  summarySheet.getRange("B3").setValue("Type 'ALL' to aggregate all months").setFontWeight("bold").setBackground("#e3e3e3");
-  summarySheet.getRange("C3").setValue(useAll || "").setNote("Type ALL to aggregate all months of data, or leave blank for current month only.");
-  summarySheet.getRange("B1:C3").setBorder(true, true, true, true, true, true).setBackground("#f9f9f9");
 
   // Section: Reporting Org Table
   let rowPtr = 5;
@@ -791,7 +809,14 @@ function updateDMARCSummary(ss) {
   const pfChartRange = summarySheet.getRange(rowPtr - 3, 2, 1, 4);
   placeChartWithTitle("DKIM/SPF Pass/Fail", pfChartRange, Charts.ChartType.PIE, 12, 4);
 
-  // Auto-resize columns and rows for best fit (with extra width for long headers)
+  // Auto-resize and style the Summary sheet
+  formatSummarySheetStyles(summarySheet, ss);
+}
+
+/**
+ * Auto-resize and style the Summary sheet columns/rows and update tab colors
+ */
+function formatSummarySheetStyles(summarySheet, ss) {
   summarySheet.autoResizeColumns(1, summarySheet.getMaxColumns());
   // Manually set minimum width for key columns to ensure full header visibility
   summarySheet.setColumnWidth(2, 140); // B: e.g. 'Reporting Org', 'Failing IP', etc.
@@ -800,7 +825,6 @@ function updateDMARCSummary(ss) {
   summarySheet.setColumnWidth(5, 120); // E: e.g. 'SPF Fail', etc.
   summarySheet.autoResizeRows(1, summarySheet.getMaxRows());
 
-  // Always set tab colors after summary update (use American English: setTabColor)
   try {
     const dmarcSheet = ss.getSheetByName("DMARC Reports");
     if (dmarcSheet) dmarcSheet.setTabColor("#4285F4");
