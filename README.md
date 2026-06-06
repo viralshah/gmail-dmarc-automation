@@ -159,7 +159,7 @@ This script is structured to be fully compatible as a Google Apps Script library
 5. **Config & Help:**
    - The "Config" sheet manages report recipients and retention settings. The "Help" sheet provides usage and glossary.
 6. **Archiving & Export:**
-   - Each month, data is archived to a new sheet and a CSV is exported to a `DMARC Archives` folder in Google Drive.
+   - Each month, data is archived to a new sheet and a CSV is exported to a Google Drive folder (configurable, defaults to `DMARC Archives`). To prevent conflicts, CSV files are isolated inside subfolders named after the active Spreadsheet (e.g. `DMARC - domain.com`).
 7. **Scheduled Reporting:**
    - A PDF summary is generated and emailed to recipients on a schedule.
 8. **Cleanup:**
@@ -194,6 +194,7 @@ This script is structured to be fully compatible as a Google Apps Script library
 - **Change the threshold for DKIM/SPF failure alerts:** Edit the `thresholdFailures` variable.
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
+- **Change the archive folder name:** Edit the value in the Config sheet ("Google Drive Archive Folder Name"). Each spreadsheet will create its own subfolder matching its spreadsheet name inside this parent folder to keep domain reports isolated.
 
 ---
 

@@ -136,6 +136,19 @@ function runDailyCleanup() {
 
 ---
 
+## Multi-Domain (Multi-Tenant) Archiving & Setup
+
+If you are managing DMARC reports for multiple domains, you should create a separate Google Sheet for each domain (e.g., `DMARC - domain1.com`, `DMARC - domain2.com`).
+
+Each sheet can import your library and run its own daily trigger. To keep the monthly CSV archives organized and prevent files from overwriting/trashing each other in Google Drive:
+
+1. **Configurable Parent Folder:** You can customize the name of the parent Google Drive folder where monthly CSVs are exported by editing the **Google Drive Archive Folder Name** setting in the `Config` tab of each sheet.
+2. **Spreadsheet-Name Subfolders:** The library automatically retrieves the name of the active spreadsheet (e.g. `DMARC - domain1.com`) and creates a subfolder with that exact name inside the parent folder. The CSV reports for that domain will be safely isolated inside its respective subfolder.
+
+This ensures you can use a single script library to process and archive reports from multiple domains without collision.
+
+---
+
 ## Best Practices & Security Scopes
 
 ### 1. Permissions & Authorization

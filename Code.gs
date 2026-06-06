@@ -341,13 +341,23 @@ function exportMonthlyCSV(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) return;
 
-  const folderName = "DMARC Archives";
-  let folder;
-  const folders = DriveApp.getFoldersByName(folderName);
-  if (folders.hasNext()) {
-    folder = folders.next();
+  const parentFolderName = getConfigValue(ss, "Google Drive Archive Folder Name", "DMARC Archives");
+  let parentFolder;
+  const parentFolders = DriveApp.getFoldersByName(parentFolderName);
+  if (parentFolders.hasNext()) {
+    parentFolder = parentFolders.next();
   } else {
-    folder = DriveApp.createFolder(folderName);
+    parentFolder = DriveApp.createFolder(parentFolderName);
+  }
+
+  // Isolate by spreadsheet name to support multi-domain setup using the same parent archive folder
+  const subfolderName = ss.getName();
+  let targetFolder;
+  const subfolders = parentFolder.getFoldersByName(subfolderName);
+  if (subfolders.hasNext()) {
+    targetFolder = subfolders.next();
+  } else {
+    targetFolder = parentFolder.createFolder(subfolderName);
   }
 
   const data = sheet.getDataRange().getValues();
@@ -374,13 +384,13 @@ function exportMonthlyCSV(ss, sheetName) {
   ).join("\r\n");
 
   const fileName = `DMARC_Report_${currentYear}_${(currentMonth + 1).toString().padStart(2, "0")}.csv`;
-  // Create or overwrite existing file
-  const existingFiles = folder.getFilesByName(fileName);
+  // Create or overwrite existing file in the domain-specific subfolder
+  const existingFiles = targetFolder.getFilesByName(fileName);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
   }
 
-  folder.createFile(fileName, csvContent, MimeType.PLAIN_TEXT);
+  targetFolder.createFile(fileName, csvContent, MimeType.PLAIN_TEXT);
 }
 
 /**
@@ -728,7 +738,8 @@ function setupConfigSheet(ssOrId) {
     ["Retention Months", 12],
     ["DMARC Label Name", "DMARC"],
     ["DMARC Processed Label Name", "DMARC/Processed"],
-    ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"]
+    ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"],
+    ["Google Drive Archive Folder Name", "DMARC Archives"]
   ];
 
   if (!configSheet) {
