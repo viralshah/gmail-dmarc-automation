@@ -56,7 +56,6 @@ function getConfigValue(ss, key, defaultValue) {
  */
 function processDMARCReports(ssOrId) {
   const sheetName = "DMARC Reports";
-  const thresholdFailures = 3;
 
   try {
     const ss = getSpreadsheet(ssOrId);
@@ -72,6 +71,7 @@ function processDMARCReports(ssOrId) {
 
     const labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
     const processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
+    const thresholdFailures = parseInt(getConfigValue(ss, "Alert Failure Threshold", 3), 10);
 
     const processedLabel = getOrCreateLabel(processedLabelName);
 
@@ -878,7 +878,8 @@ function setupConfigSheet(ssOrId) {
     ["DMARC Processed Label Name", "DMARC/Processed"],
     ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"],
     ["Google Drive Archive Folder Name", "DMARC Archives"],
-    ["Email Retention Days", 7]
+    ["Email Retention Days", 7],
+    ["Alert Failure Threshold", 3]
   ];
 
   if (!configSheet) {

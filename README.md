@@ -222,7 +222,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
   - `Fortnightly`: Sends a PDF report once every two weeks on Mondays.
   - `Monthly`: Sends a PDF report once a month on the 1st of the month.
   - `Never`: Disables scheduled PDF email reports entirely.
-- **Change the threshold for DKIM/SPF failure alerts:** Edit the `thresholdFailures` variable.
+- **Change the threshold for DKIM/SPF failure alerts:** Edit the value in the Config sheet ("Alert Failure Threshold") (defaults to `3` failures).
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
 - **Change the archive folder name:** Edit the value in the Config sheet ("Google Drive Archive Folder Name"). Each spreadsheet will create its own subfolder matching its spreadsheet name inside this parent folder to keep domain reports isolated.
