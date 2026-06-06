@@ -130,6 +130,10 @@ function runDailyCleanup() {
 }
 ```
 
+> [!TIP]
+> **Separation of Processing and Emailing:**
+> You can change the PDF report email frequency (e.g., from `Daily` to `Weekly`, `Fortnightly`, or `Monthly`) directly inside the `Config` tab. The daily trigger will continue to parse incoming emails and update the spreadsheets and charts every day, but it will only dispatch the PDF summary report emails based on the configured frequency.
+
 ---
 
 ## Best Practices & Security Scopes

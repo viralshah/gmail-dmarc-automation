@@ -185,6 +185,12 @@ This script is structured to be fully compatible as a Google Apps Script library
 
 - **Change the DMARC label name:** Edit the value in the Config sheet ("DMARC Label Name").
 - **Change the processed label name:** Edit the value in the Config sheet ("DMARC Processed Label Name").
+- **Change report frequency:** Edit the value in the Config sheet ("Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)"). Options are:
+  - `Daily`: Sends a PDF report on every daily processing run.
+  - `Weekly`: Sends a PDF report once a week on Mondays.
+  - `Fortnightly`: Sends a PDF report once every two weeks on Mondays.
+  - `Monthly`: Sends a PDF report once a month on the 1st of the month.
+  - `Never`: Disables scheduled PDF email reports entirely.
 - **Change the threshold for DKIM/SPF failure alerts:** Edit the `thresholdFailures` variable.
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").

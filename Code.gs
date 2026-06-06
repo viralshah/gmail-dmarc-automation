@@ -354,13 +354,21 @@ function exportMonthlyCSV(ss, sheetName) {
 }
 
 /**
- * Add custom menu to spreadsheet UI to manually trigger DMARC processing
+ * Add custom menu to spreadsheet UI to manually trigger DMARC processing and report dispatching
  */
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("DMARC Tools")
     .addItem("Process DMARC Reports", "processDMARCReports")
+    .addItem("Send Email Report Now", "forceSendScheduledDMARCReport")
     .addToUi();
+}
+
+/**
+ * Helper to force send the scheduled report from the spreadsheet UI menu.
+ */
+function forceSendScheduledDMARCReport() {
+  sendScheduledDMARCReport(undefined, true);
 }
 
 /**
@@ -688,7 +696,8 @@ function setupConfigSheet(ssOrId) {
     ["Report Recipients (comma separated)", Session.getActiveUser().getEmail()],
     ["Retention Months", 12],
     ["DMARC Label Name", "DMARC"],
-    ["DMARC Processed Label Name", "DMARC/Processed"]
+    ["DMARC Processed Label Name", "DMARC/Processed"],
+    ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"]
   ];
 
   if (!configSheet) {
@@ -702,7 +711,26 @@ function setupConfigSheet(ssOrId) {
   } else {
     // If the Config sheet already exists, ensure new configuration settings are added
     const data = configSheet.getDataRange().getValues();
-    const existingKeys = data.slice(1).map(row => row[0]);
+    
+    // Check if we need to migrate the old key name
+    let oldKeyRowIndex = -1;
+    let hasNewKey = false;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === "Email Report Frequency (Daily/Weekly/Monthly/Never)") {
+        oldKeyRowIndex = i + 1; // 1-indexed row number
+      } else if (data[i][0] === "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)") {
+        hasNewKey = true;
+      }
+    }
+    
+    // Migrate key if needed
+    if (oldKeyRowIndex !== -1 && !hasNewKey) {
+      configSheet.getRange(oldKeyRowIndex, 1).setValue("Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)");
+    }
+    
+    // Refresh data and add any other missing defaults
+    const updatedData = configSheet.getDataRange().getValues();
+    const existingKeys = updatedData.slice(1).map(row => row[0]);
     defaults.forEach(pair => {
       if (!existingKeys.includes(pair[0])) {
         configSheet.appendRow(pair);
@@ -958,12 +986,59 @@ function applyBranding(ssOrId) {
 }
 
 /**
+ * Helper to determine if the report email should be sent based on Config frequency.
+ * - Daily: always sends.
+ * - Weekly: sends on Mondays (day 1).
+ * - Fortnightly: sends on Mondays of even-numbered weeks.
+ * - Monthly: sends on the 1st of the month.
+ * - Never: does not send.
+ * 
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ * @return {boolean}
+ */
+function shouldSendReport(ss) {
+  let frequency = getConfigValue(ss, "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "");
+  if (!frequency) {
+    frequency = getConfigValue(ss, "Email Report Frequency (Daily/Weekly/Monthly/Never)", "Weekly");
+  }
+  const now = new Date();
+  const freqLower = frequency.toString().trim().toLowerCase();
+  
+  if (freqLower === "daily") {
+    return true;
+  } else if (freqLower === "weekly") {
+    return now.getDay() === 1; // 1 = Monday
+  } else if (freqLower === "fortnightly") {
+    if (now.getDay() !== 1) return false;
+    // Calculate ISO 8601 week number to send every two weeks (even weeks)
+    const tempDate = new Date(now.valueOf());
+    const dayNum = (now.getDay() + 6) % 7;
+    tempDate.setDate(tempDate.getDate() - dayNum + 3);
+    const firstThursday = tempDate.valueOf();
+    tempDate.setMonth(0, 1);
+    if (tempDate.getDay() !== 4) {
+      tempDate.setMonth(0, 1 + ((4 - tempDate.getDay() + 7) % 7));
+    }
+    const weekNum = 1 + Math.ceil((firstThursday - tempDate) / 604800000);
+    return weekNum % 2 === 0;
+  } else if (freqLower === "monthly") {
+    return now.getDate() === 1; // 1st of the month
+  }
+  return false;
+}
+
+/**
  * Scheduled email report: send PDF summary to recipients from Config
  * 
  * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or object.
+ * @param {boolean} [force] If true, bypasses the frequency check and sends immediately.
  */
-function sendScheduledDMARCReport(ssOrId) {
+function sendScheduledDMARCReport(ssOrId, force) {
   const ss = getSpreadsheet(ssOrId);
+  if (!force && !shouldSendReport(ss)) {
+    Logger.log("Skipping scheduled DMARC report email based on frequency config.");
+    return;
+  }
   const configSheet = ss.getSheetByName('Config');
   if (!configSheet) return;
   const recipients = configSheet.getRange(2, 2).getValue();
