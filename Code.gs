@@ -1,5 +1,3 @@
-const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
-
 /**
  * Helper to get a Spreadsheet object.
  * Resolves in the following priority order:
@@ -17,14 +15,6 @@ function getSpreadsheet(ssOrId) {
     }
     return ssOrId;
   }
-  if (typeof spreadsheetId !== 'undefined' && spreadsheetId && spreadsheetId !== "YOUR_SPREADSHEET_ID_HERE") {
-    return SpreadsheetApp.openById(spreadsheetId);
-  }
-  const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) {
-    throw new Error("No active spreadsheet found. Please provide a Spreadsheet ID.");
-  }
-  return active;
 }
 
 /**
