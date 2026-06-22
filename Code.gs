@@ -1,3 +1,6 @@
+/** Don't modify this script in Google Appscript! Instead modify this file in git and
+  push it live **/
+
 const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
 
 /**
