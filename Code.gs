@@ -75,6 +75,11 @@ function processDMARCReports(ssOrId) {
     const labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
     const processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
     const thresholdFailures = parseInt(getConfigValue(ss, "Alert Failure Threshold", 3), 10);
+    // Source IPs (or prefixes such as "209.85.220." or "2600:1901:101:") whose
+    // failures are expected, e.g. known forwarders, and should never alert.
+    const ignoredIpPrefixes = String(getConfigValue(ss, "Alert Ignore Source IP Prefixes (comma separated)", ""))
+      .split(",").map(s => s.trim()).filter(Boolean);
+    const isIgnoredIp = ip => ignoredIpPrefixes.some(prefix => ip.startsWith(prefix));
 
     const processedLabel = getOrCreateLabel(processedLabelName);
 
@@ -84,11 +89,19 @@ function processDMARCReports(ssOrId) {
     const sheet = getOrCreateSheet(ss, sheetName, [
       "Message ID", "Reporter", "Source IP", "Disposition",
       "DKIM", "SPF", "Domain", "Header From", "Count",
-      "Email Date", "Report Date", "Processed Date"
+      "Email Date", "Report Date", "Processed Date",
+      "DMARC Result", "Envelope To", "DKIM Signatures"
     ]);
 
     // Get headers from sheet to map data to correct columns dynamically (resilient to column order/upgrades)
     const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    // Sheets created by older versions lack the verdict/identity columns; add them at the end.
+    ["DMARC Result", "Envelope To", "DKIM Signatures"].forEach(name => {
+      if (sheetHeaders.indexOf(name) === -1) {
+        sheetHeaders.push(name);
+        sheet.getRange(1, sheetHeaders.length).setValue(name).setBackground("#b7e1cd").setFontWeight("bold");
+      }
+    });
     const colMap = {};
     sheetHeaders.forEach((header, index) => {
       colMap[header] = index;
@@ -165,9 +178,20 @@ function processDMARCReports(ssOrId) {
                   const spf = policy ? policy.getChildText("spf") : "";
                   const identifiers = record.getChild("identifiers");
                   const headerFrom = identifiers ? identifiers.getChildText("header_from") : "";
+                  // Microsoft (and a few others) include the recipient domain; Google does not.
+                  const envelopeTo = identifiers ? (identifiers.getChildText("envelope_to") || "") : "";
                   const authResults = record.getChild("auth_results");
                   const dkimDomain = authResults && authResults.getChild("dkim") ? authResults.getChild("dkim").getChildText("domain") : "";
                   const spfDomain = authResults && authResults.getChild("spf") ? authResults.getChild("spf").getChildText("domain") : "";
+                  // Every DKIM signature the receiver saw, e.g. "example.com:pass; google.com:pass".
+                  // A forwarded or Groups-relayed message carries a second, unaligned signature;
+                  // listing them all explains most "DKIM fail" rows at a glance.
+                  const dkimSignatures = authResults
+                    ? authResults.getChildren("dkim").map(d => `${d.getChildText("domain")}:${d.getChildText("result")}`).join("; ")
+                    : "";
+                  // The receiver's own DMARC verdict for this record. policy_evaluated.dkim/spf are
+                  // already *aligned* results, so DMARC passes if either one passes.
+                  const dmarcResult = (dkim === "pass" || spf === "pass") ? "pass" : "fail";
 
                   // Build row array dynamically matching sheet headers
                   const rowData = new Array(sheetHeaders.length).fill("");
@@ -183,12 +207,17 @@ function processDMARCReports(ssOrId) {
                   if (colMap["Email Date"] !== undefined) rowData[colMap["Email Date"]] = msgDate;
                   if (colMap["Report Date"] !== undefined) rowData[colMap["Report Date"]] = beginDate;
                   if (colMap["Processed Date"] !== undefined) rowData[colMap["Processed Date"]] = new Date();
+                  if (colMap["DMARC Result"] !== undefined) rowData[colMap["DMARC Result"]] = dmarcResult;
+                  if (colMap["Envelope To"] !== undefined) rowData[colMap["Envelope To"]] = envelopeTo;
+                  if (colMap["DKIM Signatures"] !== undefined) rowData[colMap["DKIM Signatures"]] = dkimSignatures;
 
                   Logger.log(`        Appending row: ${JSON.stringify(rowData)}`);
                   sheet.appendRow(rowData);
 
-                  // Alert if failed DKIM or SPF exceeds threshold
-                  if ((dkim === "fail" || spf === "fail") && parseInt(count, 10) >= thresholdFailures) {
+                  // Alert only on a DMARC *failure* (both aligned checks failed) that meets the
+                  // threshold and did not come from an ignored source. A row with DKIM fail but
+                  // SPF pass (or vice versa) is a DMARC pass and was the main source of false alarms.
+                  if (dmarcResult === "fail" && parseInt(count, 10) >= thresholdFailures && !isIgnoredIp(ip)) {
                     alerts.push({
                       domain: headerFrom || dkimDomain || spfDomain || "Unknown",
                       orgName: orgName,
@@ -196,6 +225,9 @@ function processDMARCReports(ssOrId) {
                       count: count,
                       dkim: dkim,
                       spf: spf,
+                      disposition: disposition,
+                      envelopeTo: envelopeTo,
+                      dkimSignatures: dkimSignatures,
                       date: beginDate ? Utilities.formatDate(beginDate, Session.getScriptTimeZone(), "yyyy-MM-dd") : "Unknown"
                     });
                   }
@@ -228,25 +260,22 @@ function processDMARCReports(ssOrId) {
       let htmlAlerts = "";
 
       alerts.forEach(alert => {
-        let failStatus = "";
-        let failBadge = "";
-
-        if (alert.dkim === "fail" && alert.spf === "fail") {
-          failStatus = "Both DKIM & SPF failed";
-          failBadge = `<span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">Both DKIM & SPF Failed</span>`;
-        } else if (alert.dkim === "fail") {
-          failStatus = "DKIM failed (SPF passed/none)";
-          failBadge = `<span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">DKIM Failed</span> <span style="background-color: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">SPF Passed/None</span>`;
-        } else {
-          failStatus = "SPF failed (DKIM passed/none)";
-          failBadge = `<span style="background-color: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">DKIM Passed/None</span> <span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">SPF Failed</span>`;
-        }
+        // Every alert is now a DMARC failure (both aligned checks failed); say what the
+        // receiver did with it and which signatures it saw, which is what you need to
+        // tell a forwarder or relay from a spoof.
+        const failStatus = `DMARC failed; receiver disposition: ${alert.disposition || "unknown"}`;
+        const failBadge = `<span style="background-color: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block;">DMARC Failed</span> <span style="background-color: #f1f3f4; color: #3c4043; padding: 4px 8px; border-radius: 4px; font-size: 12px; display: inline-block;">disposition: ${alert.disposition || "unknown"}</span>`;
+        const detailLine = [
+          alert.envelopeTo ? `Recipient domain: ${alert.envelopeTo}` : "",
+          alert.dkimSignatures ? `DKIM signatures: ${alert.dkimSignatures}` : "DKIM signatures: none"
+        ].filter(Boolean).join("\n   ");
 
         plainTextBody += `⚠️ Domain: ${alert.domain}\n`;
         plainTextBody += `   Reporter: ${alert.orgName}\n`;
         plainTextBody += `   Source IP: ${alert.ip}\n`;
         plainTextBody += `   Failures: ${alert.count} times\n`;
         plainTextBody += `   Status: ${failStatus}\n`;
+        plainTextBody += `   ${detailLine}\n`;
         plainTextBody += `   Report Date: ${alert.date}\n\n`;
 
         htmlAlerts += `
@@ -275,6 +304,14 @@ function processDMARCReports(ssOrId) {
                 <td style="padding: 8px 0 4px 0; color: #5f6368; vertical-align: middle;"><strong>Status:</strong></td>
                 <td style="padding: 8px 0 4px 0; vertical-align: middle;">${failBadge}</td>
               </tr>
+              ${alert.envelopeTo ? `<tr>
+                <td style="padding: 4px 0; color: #5f6368;"><strong>Recipient domain:</strong></td>
+                <td style="padding: 4px 0; color: #202124;">${alert.envelopeTo}</td>
+              </tr>` : ""}
+              <tr>
+                <td style="padding: 4px 0; color: #5f6368;"><strong>DKIM signatures:</strong></td>
+                <td style="padding: 4px 0; color: #202124; font-family: monospace;">${alert.dkimSignatures || "none"}</td>
+              </tr>
             </table>
           </div>
         `;
@@ -289,7 +326,7 @@ function processDMARCReports(ssOrId) {
             <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Spreadsheet: <strong>${sheetName}</strong></p>
           </div>
           <div style="padding: 20px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px; background-color: #fcfcfc;">
-            <p style="font-size: 15px; margin-top: 0; color: #202124;">The following DMARC failures exceeded the alert threshold of ${thresholdFailures} failures:</p>
+            <p style="font-size: 15px; margin-top: 0; color: #202124;">The following sources sent mail that failed DMARC outright (neither aligned DKIM nor aligned SPF passed) at least ${thresholdFailures} times in one report. Rows where only one check failed are DMARC passes and are no longer alerted; see the DKIM Signatures column in the sheet to tell forwarders from spoofs.</p>
             
             ${htmlAlerts}
             
@@ -305,7 +342,7 @@ function processDMARCReports(ssOrId) {
 
       MailApp.sendEmail({
         to: Session.getActiveUser().getEmail(),
-        subject: `DMARC Alert: SPF/DKIM Failures for ${sheetName}`,
+        subject: `DMARC Alert: ${alerts.length} failing source${alerts.length === 1 ? "" : "s"} for ${sheetName}`,
         body: plainTextBody,
         htmlBody: htmlBody
       });
@@ -883,7 +920,8 @@ function setupConfigSheet(ssOrId) {
     ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"],
     ["Google Drive Archive Folder Name", "DMARC Archives"],
     ["Email Retention Days", 7],
-    ["Alert Failure Threshold", 3]
+    ["Alert Failure Threshold", 3],
+    ["Alert Ignore Source IP Prefixes (comma separated)", ""]
   ];
 
   if (!configSheet) {
@@ -1010,10 +1048,13 @@ function enrichDMARCReportsWithGeoAndReason(ssOrId) {
       else if (spf === "fail") reason = "SPF failed. Message rejected.";
       else reason = "Rejected for other policy reason.";
     } else if (disp === "none") {
-      if (dkim === "fail" && spf === "fail") reason = "Both DKIM and SPF failed, but policy is 'none'. No action taken.";
-      else if (dkim === "fail") reason = "DKIM failed, but policy is 'none'. No action taken.";
-      else if (spf === "fail") reason = "SPF failed, but policy is 'none'. No action taken.";
-      else reason = "Passed authentication, no action taken.";
+      if (dkim === "fail" && spf === "fail") reason = "DMARC failed (neither aligned DKIM nor aligned SPF passed); policy is 'none', delivered anyway.";
+      else if (dkim === "fail") reason = "DMARC passed on SPF (DKIM not aligned). No action taken.";
+      else if (spf === "fail") reason = "DMARC passed on DKIM (SPF not aligned; typical of forwarding). No action taken.";
+      else reason = "DMARC passed on both DKIM and SPF.";
+    } else if (disp === "quarantine") {
+      if (dkim === "fail" && spf === "fail") reason = "DMARC failed; receiver quarantined the message (spam folder).";
+      else reason = `DMARC passed but receiver reports quarantine (DKIM: ${dkim}, SPF: ${spf}); likely a local policy override.`;
     } else {
       reason = `Disposition: ${disp}, DKIM: ${dkim}, SPF: ${spf}`;
     }
@@ -1079,16 +1120,19 @@ function setupHelpSheet(ssOrId) {
     ['Reporter', 'The organization that generated and sent the DMARC report (e.g. google.com, yahoo.com).'],
     ['Source IP', 'The IP address of the mail server that sent the email.'],
     ['Disposition', 'The DMARC policy action applied to the message (none, quarantine, reject).'],
-    ['DKIM', 'Result of DKIM signature verification (pass, fail, none).'],
-    ['SPF', 'Result of SPF domain validation (pass, fail, none).'],
+    ['DKIM', 'The receiver\'s *aligned* DKIM result (pass/fail): did a valid signature from the Header From domain exist? A second, unaligned signature (e.g. a forwarder\'s) does not count here; see DKIM Signatures.'],
+    ['SPF', 'The receiver\'s *aligned* SPF result (pass/fail). Fails on any forwarded message because the envelope sender is rewritten.'],
     ['Domain', 'The domain identifier parsed from the DKIM/SPF auth results.'],
     ['Header From', 'The domain name found in the "From:" header of the email message (the domain being authenticated).'],
     ['Count', 'The number of emails received from the Source IP matching this authentication status during the reporting period.'],
     ['Email Date', 'The timestamp/date when the DMARC report email was received in your Gmail inbox.'],
     ['Report Date', 'The starting timestamp/date of the DMARC report\'s window (retrieved from the XML\'s date_range begin tag).'],
     ['Processed Date', 'The timestamp when the report was parsed and appended to this spreadsheet.'],
+    ['DMARC Result', 'pass if either the aligned DKIM or the aligned SPF result passed, otherwise fail. This is the verdict that the policy (none/quarantine/reject) acts on, and the only thing the daily alert fires on.'],
+    ['Envelope To', 'The recipient domain, when the reporter includes it (Microsoft does, Google does not). Useful for identifying which correspondent\'s mail system is rewriting your messages.'],
+    ['DKIM Signatures', 'Every DKIM signature the receiver saw, as domain:result pairs. Your own domain passing alongside a third-party domain means a mailing list or forwarder re-signed the message.'],
     ['Country', 'The country name associated with the source IP address (enriched via GeoIP lookup).'],
-    ['Failure Reason', 'Plain-language explanation for why the email failed SPF/DKIM validation.']
+    ['Failure Reason', 'Plain-language reading of the DMARC Result and Disposition for this row.']
   ];
   
   helpSheet.getRange(startRow + 1, 1, colDefs.length, 2).setValues(colDefs).setFontFamily('Arial').setFontSize(10);
@@ -1108,7 +1152,9 @@ function setupHelpSheet(ssOrId) {
     ['DMARC', 'Domain-based Message Authentication, Reporting & Conformance. An email authentication protocol.'],
     ['DKIM', 'DomainKeys Identified Mail. Cryptographic signature-based email authentication.'],
     ['SPF', 'Sender Policy Framework. IP list-based email authentication.'],
-    ['Disposition', 'The policy action applied to an email failing authentication: none (log only), quarantine (spam), or reject (block).']
+    ['Disposition', 'The policy action applied to an email failing authentication: none (log only), quarantine (spam), or reject (block).'],
+    ['Alignment', 'A DKIM or SPF pass only counts for DMARC if the domain that passed matches the Header From domain. Forwarders and mailing lists typically break SPF alignment but leave an intact DKIM signature, so DMARC still passes.'],
+    ['Alert Ignore Source IP Prefixes', 'Config setting: comma-separated IPs or prefixes (e.g. 209.85.220., 104.30.) whose DMARC failures are expected and should not raise the daily alert.']
   ];
   helpSheet.getRange(startRow + 1, 1, glossary.length, 2).setValues(glossary).setFontFamily('Arial').setFontSize(10);
   helpSheet.getRange(startRow + 1, 1, 1, 2).setFontWeight('bold').setBackground('#f1f3f4').setBorder(true, true, true, true, null, null, null, null);

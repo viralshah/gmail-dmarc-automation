@@ -228,7 +228,9 @@ If you prefer editing the code locally and want to automate pushing and deployin
   - `Fortnightly`: Sends a PDF report once every two weeks on Mondays.
   - `Monthly`: Sends a PDF report once a month on the 1st of the month.
   - `Never`: Disables scheduled PDF email reports entirely.
-- **Change the threshold for DKIM/SPF failure alerts:** Edit the value in the Config sheet ("Alert Failure Threshold") (defaults to `3` failures).
+- **Change the threshold for DMARC failure alerts:** Edit the value in the Config sheet ("Alert Failure Threshold") (defaults to `3` failures). An alert fires only for a record whose **DMARC Result is fail**, i.e. neither the aligned DKIM nor the aligned SPF check passed. A row where one check failed and the other passed is a DMARC pass (common with forwarders and mailing lists) and no longer alerts.
+- **Silence known forwarders:** Put their IPs or IP prefixes in the Config sheet ("Alert Ignore Source IP Prefixes (comma separated)"), e.g. `209.85.220., 104.30.`. Matching is a simple prefix match on the source IP string; rows are still recorded in the sheet, they just do not alert.
+- **New columns since this change:** `DMARC Result` (the receiver's verdict per record), `Envelope To` (recipient domain, when the reporter supplies it; Microsoft does), and `DKIM Signatures` (every signature seen, as `domain:result`). Existing sheets gain the three columns automatically on the next run.
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
 - **Change the archive folder name:** Edit the value in the Config sheet ("Google Drive Archive Folder Name"). Each spreadsheet will create its own subfolder matching its spreadsheet name inside this parent folder to keep domain reports isolated.
