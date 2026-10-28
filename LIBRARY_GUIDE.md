@@ -162,9 +162,10 @@ If you are running directly inside the library script project itself (as the own
    - Because `UserProperties` and installable triggers are scoped per Google account, each Editor account on the shared script maintains its own isolated list of sheets and runs against its own Gmail and Drive.
    - **Note (`Script Properties` UI vs. `UserProperties`):** The table in **Project Settings (`⚙️`) → Script Properties** edits global `ScriptProperties` (shared across all users). Google's Apps Script IDE has no GUI for per-user `UserProperties`, so they are managed via the toolbar functions at the top of `Code.gs`:
      - **`provisionOnce`** — provisions a new domain and appends its `spreadsheetId` to your `UserProperties`.
+     - **`showRegisteredSheets`** — click **Run** to print a detailed mapping of each registered spreadsheet (`Domain | Sheet Name | Gmail Label | Status | ID | URL`) in the Execution log.
+     - **`pruneTrashedRegisteredSheets`** — click **Run** to check which registered spreadsheets have been moved to Google Drive Trash and unregister them (prompts for Yes/No confirmation when run from a Sheet UI, or unregisters automatically from the standalone editor; set `dryRun = true` inside it to preview without removing).
      - **`registerExistingSheetsOnce`** — paste any existing spreadsheet IDs into the array and click **Run** to add them to your `UserProperties`.
      - **`unregisterSheetsOnce`** — paste any spreadsheet IDs you want to stop processing into the array and click **Run** to remove them from your `UserProperties`.
-     - **`getRegisteredSheets`** — click **Run** to print your account's saved spreadsheet IDs in the Execution log.
 3. Under **Triggers (`⏰`)**, add two daily time-driven triggers directly on **`processAllDomains`** and **`cleanupAllDomains`**. When run by a trigger without arguments, they automatically read that user's saved spreadsheet IDs from `UserProperties`.
 
 #### Option B: Consumer Wrapper Script (For Read-Only Library Viewers)

@@ -63,6 +63,53 @@ function provisionOnce() {
 }
 
 /**
+ * Inspect all spreadsheet IDs registered in the current user's `UserProperties`
+ * and log a detailed table mapping each spreadsheet ID to its domain, sheet
+ * title, Gmail label, status (`ACTIVE`, `TRASHED`, or `INACCESSIBLE`), and URL.
+ *
+ * Select `showRegisteredSheets` in the toolbar dropdown and click Run, then
+ * check the Execution log.
+ *
+ * @return {Array<{spreadsheetId: string, domain: string, sheetName: string, label: string, status: string, url: string}>}
+ */
+function showRegisteredSheets() {
+  const ids = getRegisteredSheets();
+  if (ids.length === 0) {
+    Logger.log("No spreadsheets are currently registered in UserProperties for this user.");
+    return [];
+  }
+  Logger.log(`Registered DMARC Spreadsheets for current user (${ids.length}):`);
+  const details = ids.map((id, idx) => {
+    const info = inspectRegisteredSheet(id);
+    Logger.log(
+      `  [${idx + 1}/${ids.length}] [${info.status}] Domain: ${info.domain} | ` +
+      `Sheet: "${info.sheetName}" | Label: ${info.label} | ID: ${info.spreadsheetId}` +
+      (info.url ? ` | URL: ${info.url}` : "")
+    );
+    return info;
+  });
+  return details;
+}
+
+/**
+ * Check all spreadsheets registered in the current user's `UserProperties`,
+ * detect any that have been moved to Google Drive Trash (or permanently deleted),
+ * and unregister them.
+ *
+ * - When run from a bound Google Sheet UI, prompts with a Yes/No confirmation
+ *   dialog listing the trashed sheets before unregistering.
+ * - When run from the standalone Apps Script editor (`script.google.com`, which
+ *   does not support modal UI prompts), unregisters trashed sheets automatically
+ *   unless `dryRun` below is set to `true`.
+ *
+ * @return {{trashed: Array<Object>, removedIds: string[], remainingIds: string[]}}
+ */
+function pruneTrashedRegisteredSheets() {
+  const dryRun = false; // Set to true to only preview/log trashed sheets without unregistering them
+  return cleanupTrashedRegisteredSheets({ dryRun: dryRun });
+}
+
+/**
  * One-time helper to manually register already-existing spreadsheet ID(s) into
  * the currently logged-in user's `UserProperties` from the editor toolbar.
  *
@@ -92,30 +139,6 @@ function unregisterSheetsOnce() {
     // "1_abc123_spreadsheet_id_to_remove"
   ];
   return unregisterSheet(sheetIdsToRemove);
-}
-
-/**
- * Read and log the current user's registered spreadsheet IDs from `UserProperties`.
- * Select `getRegisteredSheets` in the toolbar and click Run to view your
- * currently saved spreadsheet IDs in the Execution log.
- *
- * `UserProperties` are scoped per Google account (`Session.getEffectiveUser()`),
- * so multiple editors/triggers on the same script project each have their own
- * independent list of sheets.
- *
- * @return {string[]} Array of spreadsheet IDs registered for the current user.
- */
-function getRegisteredSheets() {
-  try {
-    const raw = PropertiesService.getUserProperties().getProperty(USER_PROP_SHEETS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    const list = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-    Logger.log(`Registered sheets in UserProperties for current user: ${JSON.stringify(list)}`);
-    return list;
-  } catch (e) {
-    Logger.log(`getRegisteredSheets: failed to parse UserProperties: ${e}`);
-    return [];
-  }
 }
 
 
@@ -718,6 +741,142 @@ function createReportFilter(labelName, toAddresses) {
     action: { addLabelIds: [labelObj.id], removeLabelIds: ["INBOX"] }
   }, "me");
   return true;
+}
+
+/**
+ * Read the current user's registered spreadsheet IDs from `UserProperties`.
+ * `UserProperties` are scoped per Google account (`Session.getEffectiveUser()`),
+ * so multiple editors/triggers on the same script project each have their own
+ * independent list of sheets.
+ *
+ * @return {string[]} Array of spreadsheet IDs registered for the current user.
+ */
+function getRegisteredSheets() {
+  try {
+    const raw = PropertiesService.getUserProperties().getProperty(USER_PROP_SHEETS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (e) {
+    Logger.log(`getRegisteredSheets: failed to parse UserProperties: ${e}`);
+    return [];
+  }
+}
+
+/**
+ * Retrieve metadata (domain, sheet title, configured Gmail label, Drive status,
+ * and URL) for a single registered spreadsheet ID.
+ *
+ * @param {string} id The spreadsheet ID to inspect.
+ * @return {{spreadsheetId: string, domain: string, sheetName: string, label: string, status: string, url: string}}
+ */
+function inspectRegisteredSheet(id) {
+  let isTrashed = false;
+  try {
+    isTrashed = DriveApp.getFileById(id).isTrashed();
+  } catch (e) {
+    return {
+      spreadsheetId: id,
+      domain: "Unknown",
+      sheetName: "(Inaccessible or deleted)",
+      label: "-",
+      status: "INACCESSIBLE",
+      url: ""
+    };
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(id);
+    const sheetName = ss.getName() || "";
+    const label = String(getConfigValue(ss, "DMARC Label Name", "")).trim();
+    // Derive domain from "<domain>_dmarc_rua" label if possible, else from "<Domain> DMARC Report Analysis" title
+    let domain = "";
+    if (label && label.endsWith("_dmarc_rua")) {
+      domain = label.slice(0, -"_dmarc_rua".length);
+    } else if (sheetName) {
+      const m = sheetName.match(/^(\S+)\s+DMARC\s+Report\s+Analysis$/i) || sheetName.match(/DMARC\s*-\s*(\S+)/i);
+      if (m) domain = m[1].toLowerCase();
+    }
+    return {
+      spreadsheetId: id,
+      domain: domain || label || sheetName || "Unknown",
+      sheetName: sheetName,
+      label: label || "DMARC",
+      status: isTrashed ? "TRASHED" : "ACTIVE",
+      url: ss.getUrl()
+    };
+  } catch (e) {
+    return {
+      spreadsheetId: id,
+      domain: "Unknown",
+      sheetName: isTrashed ? "(Trashed spreadsheet)" : "(Inaccessible spreadsheet)",
+      label: "-",
+      status: isTrashed ? "TRASHED" : "INACCESSIBLE",
+      url: ""
+    };
+  }
+}
+
+/**
+ * Check all spreadsheets registered in the current user's `UserProperties`,
+ * identify any that are in Google Drive Trash (or inaccessible/deleted), and
+ * unregister them.
+ *
+ * If called from a Google Sheet UI context (`SpreadsheetApp.getUi()`), prompts
+ * the user with a Yes/No confirmation dialog before unregistering. If called
+ * from the standalone Apps Script editor (where UI dialogs are unavailable),
+ * unregisters automatically unless `options.dryRun` is `true`.
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.dryRun=false] If `true`, only logs trashed sheets without removing them.
+ * @return {{trashed: Array<Object>, removedIds: string[], remainingIds: string[]}}
+ */
+function cleanupTrashedRegisteredSheets(options) {
+  const o = options || {};
+  const ids = getRegisteredSheets();
+  if (ids.length === 0) {
+    Logger.log("No spreadsheets are registered in UserProperties for this user.");
+    return { trashed: [], removedIds: [], remainingIds: [] };
+  }
+
+  const inspected = ids.map(id => inspectRegisteredSheet(id));
+  const trashed = inspected.filter(info => info.status === "TRASHED" || info.status === "INACCESSIBLE");
+
+  if (trashed.length === 0) {
+    Logger.log(`All ${ids.length} registered spreadsheet(s) are active (none in Trash).`);
+    return { trashed: [], removedIds: [], remainingIds: ids };
+  }
+
+  const summaryLines = trashed.map(
+    info => `- [${info.status}] Domain: ${info.domain} | Sheet: "${info.sheetName}" | ID: ${info.spreadsheetId}`
+  ).join("\n");
+
+  Logger.log(`Found ${trashed.length} trashed/inaccessible registered spreadsheet(s):\n${summaryLines}`);
+
+  if (o.dryRun) {
+    Logger.log("Dry run enabled (dryRun: true); no spreadsheets were unregistered.");
+    return { trashed: trashed, removedIds: [], remainingIds: ids };
+  }
+
+  // Prompt for confirmation if running inside a Spreadsheet UI context
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.alert(
+      "Unregister Trashed DMARC Sheets?",
+      `The following ${trashed.length} registered spreadsheet(s) are in Trash or inaccessible:\n\n${summaryLines}\n\nUnregister them from UserProperties now?`,
+      ui.ButtonSet.YES_NO
+    );
+    if (response !== ui.Button.YES) {
+      Logger.log("User cancelled unregistering trashed spreadsheets.");
+      return { trashed: trashed, removedIds: [], remainingIds: ids };
+    }
+  } catch (e) {
+    // Running from standalone Apps Script editor or trigger where SpreadsheetApp.getUi() is unavailable; proceed automatically.
+  }
+
+  const idsToRemove = trashed.map(info => info.spreadsheetId);
+  const remainingIds = unregisterSheet(idsToRemove);
+  Logger.log(`Unregistered ${idsToRemove.length} trashed/inaccessible spreadsheet(s): ${JSON.stringify(idsToRemove)}`);
+  return { trashed: trashed, removedIds: idsToRemove, remainingIds: remainingIds };
 }
 
 /**
