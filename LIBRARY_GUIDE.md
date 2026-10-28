@@ -152,21 +152,33 @@ function runDailyCleanup() {
 ---
 
 ### Controller Setup (One Script, Many Domains)
-When one mailbox receives reports for several domains, keep a single script that
-lists the sheets and runs them all. New domains are provisioned from the same
-script. The calling script must have the **Gmail API** advanced service enabled
-(Services → + → Gmail API) for `provisionDomain` to create the Gmail filter.
+When one mailbox receives reports for several domains, you can run them all from a single pair of daily triggers in either of two ways:
+
+#### Option A: Zero-Wrapper (Direct Execution via `UserProperties`)
+If you are running directly inside the library script project itself (as the owner, or from another Google account granted **Editor** access to the project), you do not need a consumer wrapper script at all:
+1. Open the script in the Apps Script editor and edit `provisionOnce()` at the top of `Code.gs` if needed (leaving `domain = ""` defaults to the logged-in user's email domain).
+2. Select **`provisionOnce`** (the first item in the toolbar dropdown) and click **Run**.
+   - It creates the spreadsheet and tabs, populates `Config`, creates the Gmail labels and filter, and automatically saves the new `spreadsheetId` in the running user's `PropertiesService.getUserProperties()`.
+   - Because `UserProperties` and installable triggers are scoped per Google account, each Editor account on the shared script maintains its own isolated list of sheets and runs against its own Gmail and Drive.
+   - **Note (`Script Properties` UI vs. `UserProperties`):** The table in **Project Settings (`⚙️`) → Script Properties** edits global `ScriptProperties` (shared across all users). Google's Apps Script IDE has no GUI for per-user `UserProperties`, so they are managed via the toolbar functions at the top of `Code.gs`:
+     - **`provisionOnce`** — provisions a new domain and appends its `spreadsheetId` to your `UserProperties`.
+     - **`registerExistingSheetsOnce`** — paste any existing spreadsheet IDs into the array and click **Run** to add them to your `UserProperties`.
+     - **`getRegisteredSheets`** — click **Run** to print your account's saved spreadsheet IDs in the Execution log.
+3. Under **Triggers (`⏰`)**, add two daily time-driven triggers directly on **`processAllDomains`** and **`cleanupAllDomains`**. When run by a trigger without arguments, they automatically read that user's saved spreadsheet IDs from `UserProperties`.
+
+#### Option B: Consumer Wrapper Script (For Read-Only Library Viewers)
+When external users import the library with **Viewer** access, they keep a single small controller script in their own account that lists their sheets (or relies on `UserProperties`). The calling script must have the **Gmail API** advanced service enabled (Services → + → Gmail API) for `provisionDomain` to create the Gmail filter:
 
 ```javascript
 const SHEETS = [
   "1_abc123..."   // domain A
-  // add the ID returned by provisionDomain() for each new domain
+  // add the ID returned by provisionDomain() for each new domain (or omit SHEETS to use UserProperties)
 ];
 
 function runDailyDMARCProcessor() { DMARC.processAllDomains(SHEETS); }
 function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
 
-// Run once per new domain, then paste the logged spreadsheetId into SHEETS.
+// Run once per new domain, then paste the logged spreadsheetId into SHEETS (also saved to UserProperties).
 function provisionExampleDomain() {
   const r = DMARC.provisionDomain("example.com", {
     ruaAddresses: ["dmarc-rua@example.com"],          // what your DMARC rua tag says
@@ -176,10 +188,7 @@ function provisionExampleDomain() {
 }
 ```
 
-`provisionDomain` creates the spreadsheet and its tabs, fills `Config`, creates
-the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and the
-filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not
-enabled it skips the filter and logs the one to create by hand.
+`provisionDomain` creates the spreadsheet and its tabs, fills `Config`, saves the `spreadsheetId` to the executing user's `UserProperties`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and creates the filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not enabled it skips the filter and logs the one to create by hand.
 
 ### Interactive Summary Filtering (Control Cells)
 
