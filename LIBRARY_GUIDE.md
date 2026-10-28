@@ -9,7 +9,7 @@ This guide explains how to deploy the automated DMARC report processor as a **Go
 2. [Step 1: Deploying the Library](#step-1-deploying-the-library)
 3. [Step 2: Sharing with External Users](#step-2-sharing-with-external-users)
 4. [Step 3: Importing the Library (For Consumers)](#step-3-importing-the-library-for-consumers)
-5. [Step 4: Usage Code Example](#step-4-usage-code-example)
+5. [Step 4: Usage Code Example](#step-4-usage-code-example) (incl. the one-script controller setup)
 6. [Best Practices & Security Scopes](#best-practices--security-scopes)
 
 ---
@@ -150,6 +150,36 @@ function runDailyCleanup() {
 > You can change the PDF report email frequency (e.g., from `Daily` to `Weekly`, `Fortnightly`, or `Monthly`) directly inside the `Config` tab. The daily trigger will continue to parse incoming emails and update the spreadsheets and charts every day, but it will only dispatch the PDF summary report emails based on the configured frequency.
 
 ---
+
+### Controller Setup (One Script, Many Domains)
+When one mailbox receives reports for several domains, keep a single script that
+lists the sheets and runs them all. New domains are provisioned from the same
+script. The calling script must have the **Gmail API** advanced service enabled
+(Services → + → Gmail API) for `provisionDomain` to create the Gmail filter.
+
+```javascript
+const SHEETS = [
+  "1_abc123..."   // domain A
+  // add the ID returned by provisionDomain() for each new domain
+];
+
+function runDailyDMARCProcessor() { DMARC.processAllDomains(SHEETS); }
+function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
+
+// Run once per new domain, then paste the logged spreadsheetId into SHEETS.
+function provisionExampleDomain() {
+  const r = DMARC.provisionDomain("example.com", {
+    ruaAddresses: ["dmarc-rua@example.com"],          // what your DMARC rua tag says
+    ignoreSourceIpPrefixes: "209.85.220., 104.30."    // known forwarders, optional
+  });
+  Logger.log(JSON.stringify(r));
+}
+```
+
+`provisionDomain` creates the spreadsheet and its tabs, fills `Config`, creates
+the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and the
+filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not
+enabled it skips the filter and logs the one to create by hand.
 
 ### Interactive Summary Filtering (Control Cells)
 

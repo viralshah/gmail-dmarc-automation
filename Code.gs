@@ -3,6 +3,15 @@
 
 const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
 
+// Column order of the "DMARC Reports" sheet. Existing sheets gain any missing
+// columns at the end on the next run (see getOrCreateSheet).
+const REPORT_SHEET_HEADERS = [
+  "Message ID", "Reporter", "Source IP", "Disposition",
+  "DKIM", "SPF", "Domain", "Header From", "Count",
+  "Email Date", "Report Date", "Processed Date",
+  "DMARC Result", "Envelope To", "DKIM Signatures"
+];
+
 /**
  * Helper to get a Spreadsheet object.
  * Resolves in the following priority order:
@@ -51,6 +60,25 @@ function getConfigValue(ss, key, defaultValue) {
 }
 
 /**
+ * Helper to write a setting in the Config sheet, appending the row if the key is new.
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ * @param {string} key
+ * @param {*} value
+ */
+function setConfigValue(ss, key, value) {
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet) throw new Error("Config sheet missing; run setupConfigSheet first.");
+  const data = configSheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === key) {
+      configSheet.getRange(i + 1, 2).setValue(value);
+      return;
+    }
+  }
+  configSheet.appendRow([key, value]);
+}
+
+/**
  * Main function: Process DMARC reports from Gmail, parse attachments,
  * append data to spreadsheet, update summary with charts and colors,
  * and export monthly CSV archive.
@@ -86,12 +114,7 @@ function processDMARCReports(ssOrId) {
     // Automatically archive last month's data before processing new reports
     archiveLastMonthDMARCData(ss, sheetName);
 
-    const sheet = getOrCreateSheet(ss, sheetName, [
-      "Message ID", "Reporter", "Source IP", "Disposition",
-      "DKIM", "SPF", "Domain", "Header From", "Count",
-      "Email Date", "Report Date", "Processed Date",
-      "DMARC Result", "Envelope To", "DKIM Signatures"
-    ]);
+    const sheet = getOrCreateSheet(ss, sheetName, REPORT_SHEET_HEADERS);
 
     // Get headers from sheet to map data to correct columns dynamically (resilient to column order/upgrades)
     const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -1351,5 +1374,148 @@ function sendScheduledDMARCReport(ssOrId, force) {
     body: plainTextBody,
     htmlBody: htmlBody,
     attachments: [blob]
+  });
+}
+
+// =====================================================================
+// PROVISIONING AND THE ONE-SCRIPT-PER-MAILBOX ("CONTROLLER") PATTERN
+// =====================================================================
+//
+// Every function in this library takes an optional spreadsheet ID, so a
+// bound script per sheet is not required. The alternative is one small
+// script per mailbox that holds a list of sheet IDs and a single pair of
+// daily triggers:
+//
+//   const SHEETS = ["<id for domain A>", "<id for domain B>"];
+//   function runDailyDMARCProcessor() { DMARC.processAllDomains(SHEETS); }
+//   function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
+//
+// A new domain is then one call to provisionDomain() from that script and
+// one new entry in SHEETS. provisionDomain needs the Gmail advanced service
+// to create the filter (enabled in this library's appsscript.json; a
+// consumer script that calls it must enable it too: Services → + → Gmail
+// API), otherwise it does everything except the filter and tells you.
+
+/**
+ * Create and configure everything for one domain: the spreadsheet with its
+ * Config/Help/Dashboard/DMARC Reports tabs, the Gmail labels, and the Gmail
+ * filter that labels incoming aggregate reports. Idempotent for labels and
+ * the filter; always creates a new spreadsheet.
+ *
+ * @param {string} domain            e.g. "example.com". Drives the sheet name and labels.
+ * @param {Object} [options]
+ * @param {string|string[]} [options.ruaAddresses]  Address(es) in the domain's DMARC rua tag
+ *        that reports arrive at, used as the filter's "to:" criteria. Defaults to
+ *        "dmarc-rua@<domain>". Several addresses become an OR.
+ * @param {string} [options.recipients]  Digest recipients; defaults to the running user.
+ * @param {string} [options.sheetName]   Defaults to "<Domain> DMARC Report Analysis".
+ * @param {string} [options.ignoreSourceIpPrefixes]  Known forwarders to never alert on.
+ * @param {number} [options.retentionMonths=12]
+ * @param {number} [options.emailRetentionDays=30]
+ * @param {number} [options.alertThreshold=3]
+ * @param {string} [options.reportFrequency="Weekly"]
+ * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean}}
+ */
+function provisionDomain(domain, options) {
+  if (!domain) throw new Error("provisionDomain: domain is required");
+  const o = options || {};
+  const cap = domain.charAt(0).toUpperCase() + domain.slice(1);
+  const sheetName = o.sheetName || `${cap} DMARC Report Analysis`;
+  const label = `${domain}_dmarc_rua`;
+  const processedLabel = `${label}/processed`;
+  const ruaList = [].concat(o.ruaAddresses || [`dmarc-rua@${domain}`]);
+
+  // Spreadsheet and tabs
+  const ss = SpreadsheetApp.create(sheetName);
+  setupConfigSheet(ss);
+  setConfigValue(ss, "Report Recipients (comma separated)", o.recipients || Session.getActiveUser().getEmail());
+  setConfigValue(ss, "Retention Months", o.retentionMonths || 12);
+  setConfigValue(ss, "DMARC Label Name", label);
+  setConfigValue(ss, "DMARC Processed Label Name", processedLabel);
+  setConfigValue(ss, "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", o.reportFrequency || "Weekly");
+  setConfigValue(ss, "Google Drive Archive Folder Name", "DMARC Archives");
+  setConfigValue(ss, "Email Retention Days", o.emailRetentionDays || 30);
+  setConfigValue(ss, "Alert Failure Threshold", o.alertThreshold || 3);
+  setConfigValue(ss, "Alert Ignore Source IP Prefixes (comma separated)", o.ignoreSourceIpPrefixes || "");
+  setupHelpSheet(ss);
+  setupDashboardSheet(ss);
+  getOrCreateSheet(ss, "DMARC Reports", REPORT_SHEET_HEADERS);
+  const defaultSheet = ss.getSheetByName("Sheet1");
+  if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
+
+  // Gmail labels
+  getOrCreateLabel(label);
+  getOrCreateLabel(processedLabel);
+
+  // Gmail filter: to:(rua addresses) -> apply label, skip inbox
+  const filterCreated = createReportFilter(label, ruaList);
+
+  const result = { spreadsheetId: ss.getId(), url: ss.getUrl(), label: label, processedLabel: processedLabel, filterCreated: filterCreated };
+  Logger.log(`Provisioned ${domain}: ${JSON.stringify(result)}`);
+  if (!filterCreated) {
+    Logger.log(`Create the Gmail filter by hand: to:(${ruaList.join(" OR ")}) → apply label "${label}", skip the inbox.`);
+  }
+  return result;
+}
+
+/**
+ * Create the Gmail filter that labels incoming reports, using the Gmail
+ * advanced service. Returns false (and logs why) if the service is not
+ * enabled or an equivalent filter already exists.
+ * @param {string} labelName
+ * @param {string[]} toAddresses
+ * @return {boolean}
+ */
+function createReportFilter(labelName, toAddresses) {
+  if (typeof Gmail === "undefined") {
+    Logger.log("Gmail advanced service is not enabled in this script; skipping filter creation.");
+    return false;
+  }
+  const labels = Gmail.Users.Labels.list("me").labels || [];
+  const labelObj = labels.find(l => l.name === labelName);
+  if (!labelObj) {
+    Logger.log(`Label ${labelName} not visible through the Gmail API yet; skipping filter creation.`);
+    return false;
+  }
+  const criteriaTo = toAddresses.length === 1 ? toAddresses[0] : `(${toAddresses.join(" OR ")})`;
+  const existing = (Gmail.Users.Settings.Filters.list("me").filter || [])
+    .some(f => f.criteria && f.criteria.to === criteriaTo);
+  if (existing) {
+    Logger.log(`A filter for to:${criteriaTo} already exists; leaving it.`);
+    return true;
+  }
+  Gmail.Users.Settings.Filters.create({
+    criteria: { to: criteriaTo },
+    action: { addLabelIds: [labelObj.id], removeLabelIds: ["INBOX"] }
+  }, "me");
+  return true;
+}
+
+/**
+ * Run the daily processing for several sheets from one script. Errors in
+ * one domain are logged and do not stop the others.
+ * @param {string[]} spreadsheetIds
+ */
+function processAllDomains(spreadsheetIds) {
+  (spreadsheetIds || []).forEach(id => {
+    try {
+      processDMARCReports(id);
+    } catch (e) {
+      Logger.log(`processAllDomains: ${id} failed: ${e}`);
+    }
+  });
+}
+
+/**
+ * Run the daily Gmail cleanup for several sheets from one script.
+ * @param {string[]} spreadsheetIds
+ */
+function cleanupAllDomains(spreadsheetIds) {
+  (spreadsheetIds || []).forEach(id => {
+    try {
+      deleteOldProcessedDMARCEmails(id);
+    } catch (e) {
+      Logger.log(`cleanupAllDomains: ${id} failed: ${e}`);
+    }
   });
 }
