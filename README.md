@@ -143,6 +143,54 @@ This script is structured to be fully compatible as a Google Apps Script library
    *Note: If no spreadsheet ID or object is passed, the functions will automatically fall back to the active spreadsheet of the container script, or the legacy global `spreadsheetId` variable if defined.*
 
 
+### One script per mailbox: provisioning and the controller pattern
+
+Every library function accepts a spreadsheet ID, so you do not need a bound
+script per sheet. Instead, keep **one small script per mailbox** that lists the
+sheets it owns and runs them all from a single pair of triggers:
+
+```js
+// Controller script (any standalone or bound Apps Script project in the mailbox
+// that receives the reports). Library added as `DMARC`; Services → + → Gmail API
+// enabled so provisionDomain can create filters.
+const SHEETS = [
+  "1_abc123...",   // example.com
+  "1_def456...",   // example.org
+];
+function runDailyDMARCProcessor() { DMARC.processAllDomains(SHEETS); }
+function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
+```
+
+Install two daily time-driven triggers on `runDailyDMARCProcessor` and
+`runDailyCleanup`. A failure in one domain is logged and does not stop the rest.
+
+**Adding a domain** is then one call, run once from the controller's editor:
+
+```js
+function provisionExampleDomain() {
+  const r = DMARC.provisionDomain("example.com", {
+    ruaAddresses: ["dmarc-rua@example.com", "dmarc-rua+sub.example@example.com"],
+    ignoreSourceIpPrefixes: "209.85.220., 104.30., 2600:1901:101:"
+  });
+  Logger.log(r.spreadsheetId);   // paste into SHEETS
+}
+```
+
+`provisionDomain(domain, options)` creates the spreadsheet (named
+`<Domain> DMARC Report Analysis` unless `options.sheetName` says otherwise),
+runs the Config/Help/Dashboard setup, fills Config with the standard values
+(`<domain>_dmarc_rua` label and its `/processed` sub-label, recipients
+defaulting to the running user, 12-month retention, 30-day email retention,
+threshold 3, and `options.ignoreSourceIpPrefixes`), creates both Gmail labels,
+and creates the Gmail filter `to:(<rua addresses>) → apply label, skip inbox`.
+The filter step needs the **Gmail advanced service** in the calling script; if
+it is not enabled, everything else is done and the log tells you what filter to
+create by hand. `options.ruaAddresses` defaults to `dmarc-rua@<domain>`; pass
+the address(es) actually in your DMARC `rua` tag.
+
+Existing per-sheet wrappers keep working; the two patterns can coexist in one
+mailbox as long as a given sheet is only run by one of them.
+
 ### Automating Deployments with Clasp & Git Hooks
 
 If you prefer editing the code locally and want to automate pushing and deploying to Google Apps Script, you can use the preconfigured **clasp** setup:
@@ -205,6 +253,9 @@ If you prefer editing the code locally and want to automate pushing and deployin
 ---
 
 ## Script Functions (Key)
+
+- `provisionDomain(domain, options)` — create sheet, Config, labels and Gmail filter for a new domain; returns the spreadsheet ID.
+- `processAllDomains(ids)` / `cleanupAllDomains(ids)` — run the daily jobs for several sheets from one script.
 
 - `autoLabelDMARCReports(ssOrId)`: Labels new DMARC emails in Gmail.
 - `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV. **(Recommended main trigger if you set up the Gmail filter)**.
