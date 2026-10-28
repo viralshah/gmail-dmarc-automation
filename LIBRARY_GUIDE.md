@@ -158,15 +158,15 @@ When one mailbox receives reports for several domains, you can run them all from
 If you are running directly inside the library script project itself (as the owner, or from another Google account granted **Editor** access to the project), you do not need a consumer wrapper script at all:
 1. Open the script in the Apps Script editor and edit `provisionOnce()` at the top of `Code.gs` if needed (leaving `domain = ""` defaults to the logged-in user's email domain).
 2. Select **`provisionOnce`** (the first item in the toolbar dropdown) and click **Run**.
-   - It creates the spreadsheet and tabs, populates `Config`, creates the Gmail labels and filter, and automatically saves the new `spreadsheetId` in the running user's `PropertiesService.getUserProperties()`.
+   - It creates the spreadsheet and tabs, populates `Config`, creates the Gmail labels and filter, automatically saves the new `spreadsheetId` in the running user's `PropertiesService.getUserProperties()`, and automatically creates the user's two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) via `ensureDailyTriggers()`.
    - Because `UserProperties` and installable triggers are scoped per Google account, each Editor account on the shared script maintains its own isolated list of sheets and runs against its own Gmail and Drive.
    - **Note (`Script Properties` UI vs. `UserProperties`):** The table in **Project Settings (`⚙️`) → Script Properties** edits global `ScriptProperties` (shared across all users). Google's Apps Script IDE has no GUI for per-user `UserProperties`, so they are managed via the toolbar functions at the top of `Code.gs`:
-     - **`provisionOnce`** — provisions a new domain and appends its `spreadsheetId` to your `UserProperties`.
+     - **`provisionOnce`** — provisions a new domain, appends its `spreadsheetId` to your `UserProperties`, and installs your daily triggers.
+     - **`ensureDailyTriggers`** — click **Run** to create the daily `processAllDomains` and `cleanupAllDomains` triggers for your account (idempotent; skips if they already exist).
      - **`showRegisteredSheets`** — click **Run** to print a detailed mapping of each registered spreadsheet (`Domain | Sheet Name | Gmail Label | Status | ID | URL`) in the Execution log.
      - **`pruneTrashedRegisteredSheets`** — click **Run** to check which registered spreadsheets have been moved to Google Drive Trash and unregister them (prompts for Yes/No confirmation when run from a Sheet UI, or unregisters automatically from the standalone editor; set `dryRun = true` inside it to preview without removing).
-     - **`registerExistingSheetsOnce`** — paste any existing spreadsheet IDs into the array and click **Run** to add them to your `UserProperties`.
      - **`unregisterSheetsOnce`** — paste any spreadsheet IDs you want to stop processing into the array and click **Run** to remove them from your `UserProperties`.
-3. Under **Triggers (`⏰`)**, add two daily time-driven triggers directly on **`processAllDomains`** and **`cleanupAllDomains`**. When run by a trigger without arguments, they automatically read that user's saved spreadsheet IDs from `UserProperties`.
+     - *(For migrating legacy pre-existing sheets created before `provisionOnce`, see `registerExistingSheetsOnce` in the Legacy section at the bottom of `Code.gs`.)*
 
 #### Option B: Consumer Wrapper Script (For Read-Only Library Viewers)
 When external users import the library with **Viewer** access, they keep a single small controller script in their own account that lists their sheets (or relies on `UserProperties`). The calling script must have the **Gmail API** advanced service enabled (Services → + → Gmail API) for `provisionDomain` to create the Gmail filter:
@@ -237,10 +237,12 @@ This ensures you can use a single script library to process and archive reports 
 ### 1. Permissions & Authorization
 When external users run your library for the first time, Google will ask them to authorize the following scopes:
 - `https://www.googleapis.com/auth/gmail.modify` (to read and label DMARC emails)
-- `https://www.googleapis.com/auth/spreadsheets` (to edit the sheet)
-- `https://www.googleapis.com/auth/drive` (to export CSV reports)
-- `https://www.googleapis.com/auth/script.external_request` (for GeoIP lookups via `ip-api.com`)
-- `https://www.googleapis.com/auth/script.send_mail` (to email PDF summary reports)
+- `https://www.googleapis.com/auth/gmail.settings.basic` (when `Gmail` advanced service is enabled to create Gmail filters via `provisionDomain`)
+- `https://www.googleapis.com/auth/spreadsheets` (to create and edit sheets)
+- `https://www.googleapis.com/auth/drive` (to export CSV reports and check trashed status)
+- `https://www.googleapis.com/auth/script.scriptapp` (to install daily triggers automatically via `ensureDailyTriggers`)
+- `https://www.googleapis.com/auth/script.external_request` (for GeoIP lookups via `ip-api.com` and PDF export)
+- `https://www.googleapis.com/auth/script.send_mail` (to email failure alerts and PDF summary reports)
 
 All authorization prompts will state that the script belongs to *your* email address (the library owner). Let your users know to expect this.
 

@@ -35,9 +35,9 @@ const REPORT_SHEET_HEADERS = [
 //   1. Edit `provisionOnce()` below if needed (or leave `domain` empty to use
 //      your logged-in Google account's email domain) and click Run.
 //   2. The new spreadsheet ID is saved automatically in your account's
-//      `PropertiesService.getUserProperties()` (isolated per Google account).
-//   3. Add two daily time-driven triggers on `processAllDomains` and
-//      `cleanupAllDomains`.
+//      `PropertiesService.getUserProperties()` (isolated per Google account),
+//      and your account's two daily time-driven triggers (`processAllDomains`
+//      and `cleanupAllDomains`) are created automatically via `ensureDailyTriggers()`.
 
 /**
  * One-time setup helper to run directly from the Apps Script editor dropdown.
@@ -46,12 +46,11 @@ const REPORT_SHEET_HEADERS = [
  *
  * Creates the spreadsheet and its tabs (`Config`, `Help`, `Dashboard`,
  * `DMARC Reports`), creates the `<domain>_dmarc_rua` and
- * `<domain>_dmarc_rua/processed` Gmail labels, creates the Gmail filter, and
- * saves the new spreadsheet ID in your account's `UserProperties` so daily
- * triggers on `processAllDomains` and `cleanupAllDomains` pick it up
- * automatically with no wrapper script required.
+ * `<domain>_dmarc_rua/processed` Gmail labels, creates the Gmail filter,
+ * saves the new spreadsheet ID in your account's `UserProperties`, and ensures
+ * your two daily triggers (`processAllDomains` and `cleanupAllDomains`) exist.
  *
- * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean, registeredSheets: string[]}}
+ * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean, triggers: Object, registeredSheets: string[]}}
  */
 function provisionOnce() {
   const domain = ""; // e.g. "example.com" (leave "" to use your logged-in email's domain)
@@ -60,6 +59,76 @@ function provisionOnce() {
     // ignoreSourceIpPrefixes: "209.85.220., 104.30.",   // known forwarders to silence alerts on
   };
   return provisionDomain(domain, options);
+}
+
+/**
+ * Ensure the currently logged-in user has the two daily time-driven triggers
+ * (`processAllDomains` and `cleanupAllDomains`) installed on this script project.
+ *
+ * `ScriptApp.getProjectTriggers()` only returns triggers owned by the current
+ * user, so each Editor account gets its own isolated pair of daily triggers
+ * without duplicating existing ones. Called automatically by `provisionDomain()`,
+ * or can be run directly from the toolbar dropdown if you already provisioned
+ * your domains.
+ *
+ * @param {Object} [options]
+ * @param {number} [options.processHour=6] Hour of day (0–23) for `processAllDomains` (default: 6am–7am).
+ * @param {number} [options.cleanupHour=7] Hour of day (0–23) for `cleanupAllDomains` (default: 7am–8am).
+ * @return {{processTriggerCreated: boolean, cleanupTriggerCreated: boolean, activeTriggerHandlers: string[]}}
+ */
+function ensureDailyTriggers(options) {
+  const o = (options && typeof options === "object") ? options : {};
+  const processHour = typeof o.processHour === "number" ? o.processHour : 6;
+  const cleanupHour = typeof o.cleanupHour === "number" ? o.cleanupHour : 7;
+
+  try {
+    const existingTriggers = ScriptApp.getProjectTriggers();
+    const existingHandlers = existingTriggers.map(t => t.getHandlerFunction());
+
+    let processTriggerCreated = false;
+    let cleanupTriggerCreated = false;
+
+    if (!existingHandlers.includes("processAllDomains")) {
+      ScriptApp.newTrigger("processAllDomains")
+        .timeBased()
+        .everyDays(1)
+        .atHour(processHour)
+        .create();
+      processTriggerCreated = true;
+      existingHandlers.push("processAllDomains");
+      Logger.log(`Created daily trigger for processAllDomains (at hour ${processHour}).`);
+    } else {
+      Logger.log("Daily trigger for processAllDomains already exists for current user.");
+    }
+
+    if (!existingHandlers.includes("cleanupAllDomains")) {
+      ScriptApp.newTrigger("cleanupAllDomains")
+        .timeBased()
+        .everyDays(1)
+        .atHour(cleanupHour)
+        .create();
+      cleanupTriggerCreated = true;
+      existingHandlers.push("cleanupAllDomains");
+      Logger.log(`Created daily trigger for cleanupAllDomains (at hour ${cleanupHour}).`);
+    } else {
+      Logger.log("Daily trigger for cleanupAllDomains already exists for current user.");
+    }
+
+    const result = {
+      processTriggerCreated: processTriggerCreated,
+      cleanupTriggerCreated: cleanupTriggerCreated,
+      activeTriggerHandlers: existingHandlers
+    };
+    Logger.log(`Trigger status for current user: ${JSON.stringify(result)}`);
+    return result;
+  } catch (e) {
+    Logger.log(`ensureDailyTriggers: could not create triggers automatically (${e}). If running as a read-only library Viewer, add triggers in your own controller script.`);
+    return {
+      processTriggerCreated: false,
+      cleanupTriggerCreated: false,
+      activeTriggerHandlers: []
+    };
+  }
 }
 
 /**
@@ -107,23 +176,6 @@ function showRegisteredSheets() {
 function pruneTrashedRegisteredSheets() {
   const dryRun = false; // Set to true to only preview/log trashed sheets without unregistering them
   return cleanupTrashedRegisteredSheets({ dryRun: dryRun });
-}
-
-/**
- * One-time helper to manually register already-existing spreadsheet ID(s) into
- * the currently logged-in user's `UserProperties` from the editor toolbar.
- *
- * Note: Google Apps Script's "Project Settings → Script Properties" UI edits
- * global `ScriptProperties` shared by all users; per-user `UserProperties` have
- * no UI screen and can only be set in code via `provisionOnce()` or this helper.
- *
- * @return {string[]} The updated list of registered spreadsheet IDs for this user.
- */
-function registerExistingSheetsOnce() {
-  const existingSheetIds = [
-    // "1_abc123_your_existing_spreadsheet_id"
-  ];
-  return registerSheet(existingSheetIds);
 }
 
 /**
@@ -662,6 +714,9 @@ function provisionDomain(domain, options) {
   // Gmail filter: to:(rua addresses) -> apply label, skip inbox
   const filterCreated = createReportFilter(label, ruaList);
 
+  // Daily time-driven triggers (processAllDomains & cleanupAllDomains) for current user
+  const triggers = o.createTriggers !== false ? ensureDailyTriggers(o) : null;
+
   const result = {
     spreadsheetId: ss.getId(),
     url: ss.getUrl(),
@@ -669,6 +724,7 @@ function provisionDomain(domain, options) {
     processedLabel: processedLabel,
     filterCreated: filterCreated,
     alreadyExisted: alreadyExisted,
+    triggers: triggers,
     registeredSheets: registeredSheets
   };
   Logger.log(`Provisioned ${resolvedDomain}: ${JSON.stringify(result)}`);
@@ -1953,6 +2009,20 @@ function getOrCreateLabel(name) {
  * library functions instead of hardcoding an ID here.
  */
 const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
+
+/**
+ * Legacy migration helper to manually register pre-existing spreadsheet ID(s)
+ * (created before `provisionOnce()` existed) into the currently logged-in
+ * user's `UserProperties`.
+ *
+ * @return {string[]} The updated list of registered spreadsheet IDs for this user.
+ */
+function registerExistingSheetsOnce() {
+  const existingSheetIds = [
+    // "1_abc123_your_existing_spreadsheet_id"
+  ];
+  return registerSheet(existingSheetIds);
+}
 
 /**
  * Legacy combined trigger helper: searches Gmail to auto-label recent DMARC

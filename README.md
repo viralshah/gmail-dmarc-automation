@@ -53,21 +53,32 @@ This Google Apps Script automates the entire workflow of collecting, parsing, st
 
 ## Setup Instructions
 
-### 1. Prepare Your Google Sheet
+### Recommended: Automated One-Click Setup (`provisionOnce`)
+1. Create a standalone Apps Script project at [script.google.com](https://script.google.com), paste [`Code.gs`](file:///Code.gs), and enable **Services → `+` → Gmail API** (or clone this repo and run `clasp push`).
+2. In `provisionOnce()` at the top of `Code.gs`, edit `domain` / `options` if needed (or leave `domain = ""` to automatically use your logged-in Google account's email domain).
+3. Select **`provisionOnce`** in the toolbar dropdown and click **Run**.
+   - Automatically creates the `<Domain> DMARC Report Analysis` Google Sheet and all its tabs (`Config`, `Help`, `Dashboard`, `DMARC Reports`).
+   - Automatically creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` Gmail labels and the inbox-skipping Gmail filter.
+   - Automatically saves the spreadsheet ID in your account's `PropertiesService.getUserProperties()`.
+   - Automatically installs your two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) via `ensureDailyTriggers()`.
+
+---
+
+### Alternative: Manual Single-Sheet Setup (Legacy)
+
+#### 1. Prepare Your Google Sheet
 - Create a new Google Sheet (or use an existing one).
 - Note the Sheet's ID (the long string in the URL between `/d/` and `/edit`).
 
-### 2. Add the Script
-- Open your Google Sheet.
-- Go to **Extensions → Apps Script**.
-- Paste the entire script into the editor, replacing any existing code.
-- At the **very top of the script**, set the `spreadsheetId` variable to your Sheet's ID:
+#### 2. Add the Script
+- Open your Google Sheet and go to **Extensions → Apps Script** (or open a standalone script).
+- Paste the script into the editor, replacing any existing code.
+- If using a standalone script without `provisionOnce()`, set the `spreadsheetId` variable in the **Legacy** section at the bottom of `Code.gs` (or register it via `registerExistingSheetsOnce()`):
   ```js
   const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
   ```
-- **You only need to update this variable in one place for new deployments.**
 
-### 3. Set Up Gmail Filter and Label (Strongly Recommended)
+#### 3. Set Up Gmail Filter and Label (Strongly Recommended)
 
 **Why is this important?**  
 The script relies on a Gmail label (default: `DMARC`) to find and process DMARC report emails. Proper labeling ensures:
@@ -153,18 +164,15 @@ If you own this script project (or share it with your other Google accounts as a
 1. Open the script in the Apps Script editor (`script.google.com`).
 2. In `provisionOnce()` at the top of `Code.gs`, edit `domain` / `options` if needed (or leave `domain = ""` to automatically use your logged-in Google account's email domain).
 3. Select **`provisionOnce`** (the very first item in the toolbar dropdown) and click **Run**.
-   - It creates the spreadsheet and its tabs, populates `Config`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` Gmail labels, creates the Gmail filter (`to:(<rua addresses>) → apply label, skip inbox`), and **saves the new `spreadsheetId` in your account's `PropertiesService.getUserProperties()`**.
+   - It creates the spreadsheet and its tabs, populates `Config`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` Gmail labels, creates the Gmail filter (`to:(<rua addresses>) → apply label, skip inbox`), **saves the new `spreadsheetId` in your account's `PropertiesService.getUserProperties()`**, and **automatically creates your account's two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`)** via `ensureDailyTriggers()`.
    - Because `UserProperties` and installable triggers are isolated per Google account, multiple accounts with Editor access on the same script project each keep their own separate list of spreadsheets and run under their own Gmail/Drive context.
    - **Important (`Script Properties` UI vs. `UserProperties`):** Do **not** set `SHEETS` under **Project Settings (`⚙️`) → Script Properties**—that UI edits global `ScriptProperties`, which are shared across all users of the project. Google's Apps Script IDE does not have a UI screen for per-user `UserProperties`; instead:
-     - **To add a newly provisioned sheet:** Run `provisionOnce()` (saves to your `UserProperties` automatically).
+     - **To add a newly provisioned sheet (and auto-create daily triggers):** Run `provisionOnce()` (saves to your `UserProperties` and calls `ensureDailyTriggers()` automatically).
+     - **To install daily triggers if your sheets are already provisioned:** Select `ensureDailyTriggers` in the toolbar dropdown and click **Run**.
      - **To view your saved sheets (and which domain each belongs to):** Select `showRegisteredSheets` in the toolbar dropdown and click **Run** (prints each sheet's domain, title, Gmail label, status, ID, and URL in the Execution log).
      - **To automatically check and unregister trashed sheets:** Select `pruneTrashedRegisteredSheets` in the toolbar dropdown and click **Run** (prompts for confirmation when run from a Sheet UI, or unregisters trashed sheets automatically from the editor; set `dryRun = true` inside it to preview first).
-     - **To register an already-existing sheet:** Paste its ID into `registerExistingSheetsOnce()` at the top of `Code.gs` and click **Run**.
      - **To unregister/remove a specific sheet:** Paste its ID into `unregisterSheetsOnce()` at the top of `Code.gs` and click **Run**.
-4. In **Triggers (`⏰`)**, add two daily time-driven triggers directly on:
-   - **`processAllDomains`**
-   - **`cleanupAllDomains`**
-   When invoked by a trigger (with no array argument), they automatically read the trigger creator's registered spreadsheet IDs from `UserProperties`.
+     - **To migrate/register a legacy pre-existing sheet:** Paste its ID into `registerExistingSheetsOnce()` in the Legacy section at the bottom of `Code.gs` and click **Run**.
 
 #### Option B: External library consumer controller script (for read-only Viewers)
 When sharing the library with external users who have **Viewer** (read-only) access, or if you prefer listing your sheet IDs explicitly in code, keep **one small script per mailbox** that imports the library as `DMARC` (with **Services → + → Gmail API** enabled so `provisionDomain` can create filters):
@@ -278,19 +286,26 @@ If you prefer editing the code locally and want to automate pushing and deployin
 
 ## Script Functions (Key)
 
-- `provisionOnce()` / `provisionDomain(domain, options)` — create sheet, Config, labels and Gmail filter for a new domain; saves the spreadsheet ID in the running user's `UserProperties` and returns it.
-- `processAllDomains(ids)` / `cleanupAllDomains(ids)` — run the daily jobs for several sheets from one script (uses `ids` if passed, or falls back to the running user's registered sheets in `UserProperties`).
-- `showRegisteredSheets()` / `pruneTrashedRegisteredSheets()` / `registerExistingSheetsOnce()` / `unregisterSheetsOnce()` / `getRegisteredSheets()` / `registerSheet(id)` / `unregisterSheet(id)` — inspect, prune trashed sheets, or manage the current user's spreadsheet IDs stored in `UserProperties`.
+### Interactive Toolbar & Provisioning Functions
+- `provisionOnce()` / `provisionDomain(domain, options)` — idempotently create (or reuse) the spreadsheet, `Config`/`Help`/`Dashboard`/`DMARC Reports` tabs, Gmail labels, Gmail filter, and daily triggers for a domain; saves the spreadsheet ID in the running user's `UserProperties`.
+- `ensureDailyTriggers(options)` — idempotently install the two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) for the currently logged-in user.
+- `showRegisteredSheets()` — inspect all spreadsheets registered in the current user's `UserProperties` and log their domain, sheet title, Gmail label, status (`ACTIVE`/`TRASHED`/`INACCESSIBLE`), ID, and URL.
+- `pruneTrashedRegisteredSheets()` / `cleanupTrashedRegisteredSheets(options)` — detect registered spreadsheets that have been moved to Google Drive Trash and unregister them (prompts for Yes/No confirmation when run from a Sheet UI).
+- `unregisterSheetsOnce()` / `unregisterSheet(ids)` / `registerSheet(ids)` / `getRegisteredSheets()` — manage the current user's spreadsheet IDs in `UserProperties`.
 
-- `autoLabelDMARCReports(ssOrId)`: Labels new DMARC emails in Gmail.
-- `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV. **(Recommended main trigger if you set up the Gmail filter)**.
-- `autoLabelAndProcessDMARCReports(ssOrId)`: Runs both labeling and processing in one go (only use as your main trigger if you did not set up the Gmail filter).
-- `deleteOldProcessedDMARCEmails(ssOrId)`: Deletes processed DMARC emails older than 7 days (set as a daily trigger).
-- `setupConfigSheet(ssOrId)`, `setupHelpSheet(ssOrId)`, `setupDashboardSheet(ssOrId)`: Create and update Config, Help, and Dashboard sheets.
-- `purgeOldDMARCData(ssOrId)`: Purges data older than retention period.
-- `addDrillDownLinksToSummary(ssOrId)`: Adds drill-down hyperlinks in Summary.
-- `sendScheduledDMARCReport(ssOrId)`: Exports Summary as PDF and emails to recipients.
-- `applyBranding(ssOrId)`: Applies font/color styling (no logo logic).
+### Daily Automation & Core Functions
+- `processAllDomains(ids)` / `cleanupAllDomains(ids)` — run the daily report processing or Gmail cleanup across all sheets (uses `ids` if passed, or falls back to the running user's registered sheets in `UserProperties`).
+- `processDMARCReports(ssOrId)` — process labeled DMARC emails for a single spreadsheet, parse attachments, append data, enrich, update Summary/Dashboard, export CSV, and send alerts/scheduled reports.
+- `deleteOldProcessedDMARCEmails(ssOrId)` — trash processed DMARC emails older than configured retention days (`Email Retention Days` in `Config`).
+- `setupConfigSheet(ssOrId)`, `setupHelpSheet(ssOrId)`, `setupDashboardSheet(ssOrId)` — create and update `Config`, `Help`, and `Dashboard` sheets.
+- `purgeOldDMARCData(ssOrId)` — purge rows older than `Retention Months` in `Config`.
+- `addDrillDownLinksToSummary(ssOrId)` — add drill-down hyperlinks in `Summary`.
+- `sendScheduledDMARCReport(ssOrId, force)` — export `Summary` as PDF and email to recipients.
+- `applyBranding(ssOrId)` — apply font/color styling.
+
+### Legacy / Backward-Compatibility Functions (at bottom of `Code.gs`)
+- `registerExistingSheetsOnce()` — manually register pre-existing spreadsheet IDs into `UserProperties`.
+- `autoLabelDMARCReports(ssOrId)` / `autoLabelAndProcessDMARCReports(ssOrId)` — search and label DMARC emails in Gmail (only needed if not using a Gmail filter).
 
 ---
 
