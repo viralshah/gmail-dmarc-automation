@@ -160,6 +160,10 @@ If you are running directly inside the library script project itself (as the own
 2. Select **`provisionOnce`** (the first item in the toolbar dropdown) and click **Run**.
    - It creates the spreadsheet and tabs, populates `Config`, creates the Gmail labels and filter, automatically saves the new `spreadsheetId` in the running user's `PropertiesService.getUserProperties()`, and automatically creates the user's two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) via `ensureDailyTriggers()`.
    - Because `UserProperties` and installable triggers are scoped per Google account, each Editor account on the shared script maintains its own isolated list of sheets and runs against its own Gmail and Drive.
+   - **Note (`Triggers` Dashboard — `Owned by: Me` vs. `Other user`):** When multiple Editor accounts run `provisionOnce` / `ensureDailyTriggers` on the same shared script project, the **Triggers (`⏰`)** page shows all triggers across all accounts in one combined list. Check the **`Owned by`** column:
+     - **`Owned by: Me`** runs as your currently logged-in account (using your `UserProperties`, Gmail, and Drive).
+     - **`Owned by: Other user`** runs as that other Editor's account (using their `UserProperties`, Gmail, and Drive).
+     - They are **not** universal triggers—each account needs its own `processAllDomains` and `cleanupAllDomains` rows in the table.
    - **Note (`Script Properties` UI vs. `UserProperties`):** The table in **Project Settings (`⚙️`) → Script Properties** edits global `ScriptProperties` (shared across all users). Google's Apps Script IDE has no GUI for per-user `UserProperties`, so they are managed via the toolbar functions at the top of `Code.gs`:
      - **`provisionOnce`** — provisions a new domain, appends its `spreadsheetId` to your `UserProperties`, and installs your daily triggers.
      - **`ensureDailyTriggers`** — click **Run** to create the daily `processAllDomains` and `cleanupAllDomains` triggers for your account (idempotent; skips if they already exist).

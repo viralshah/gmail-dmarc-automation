@@ -81,54 +81,45 @@ function ensureDailyTriggers(options) {
   const processHour = typeof o.processHour === "number" ? o.processHour : 6;
   const cleanupHour = typeof o.cleanupHour === "number" ? o.cleanupHour : 7;
 
-  try {
-    const existingTriggers = ScriptApp.getProjectTriggers();
-    const existingHandlers = existingTriggers.map(t => t.getHandlerFunction());
+  const existingTriggers = ScriptApp.getProjectTriggers();
+  const existingHandlers = existingTriggers.map(t => t.getHandlerFunction());
 
-    let processTriggerCreated = false;
-    let cleanupTriggerCreated = false;
+  let processTriggerCreated = false;
+  let cleanupTriggerCreated = false;
 
-    if (!existingHandlers.includes("processAllDomains")) {
-      ScriptApp.newTrigger("processAllDomains")
-        .timeBased()
-        .everyDays(1)
-        .atHour(processHour)
-        .create();
-      processTriggerCreated = true;
-      existingHandlers.push("processAllDomains");
-      Logger.log(`Created daily trigger for processAllDomains (at hour ${processHour}).`);
-    } else {
-      Logger.log("Daily trigger for processAllDomains already exists for current user.");
-    }
-
-    if (!existingHandlers.includes("cleanupAllDomains")) {
-      ScriptApp.newTrigger("cleanupAllDomains")
-        .timeBased()
-        .everyDays(1)
-        .atHour(cleanupHour)
-        .create();
-      cleanupTriggerCreated = true;
-      existingHandlers.push("cleanupAllDomains");
-      Logger.log(`Created daily trigger for cleanupAllDomains (at hour ${cleanupHour}).`);
-    } else {
-      Logger.log("Daily trigger for cleanupAllDomains already exists for current user.");
-    }
-
-    const result = {
-      processTriggerCreated: processTriggerCreated,
-      cleanupTriggerCreated: cleanupTriggerCreated,
-      activeTriggerHandlers: existingHandlers
-    };
-    Logger.log(`Trigger status for current user: ${JSON.stringify(result)}`);
-    return result;
-  } catch (e) {
-    Logger.log(`ensureDailyTriggers: could not create triggers automatically (${e}). If running as a read-only library Viewer, add triggers in your own controller script.`);
-    return {
-      processTriggerCreated: false,
-      cleanupTriggerCreated: false,
-      activeTriggerHandlers: []
-    };
+  if (!existingHandlers.includes("processAllDomains")) {
+    ScriptApp.newTrigger("processAllDomains")
+      .timeBased()
+      .everyDays(1)
+      .atHour(processHour)
+      .create();
+    processTriggerCreated = true;
+    existingHandlers.push("processAllDomains");
+    Logger.log(`Created daily trigger for processAllDomains (at hour ${processHour}).`);
+  } else {
+    Logger.log("Daily trigger for processAllDomains already exists for current user.");
   }
+
+  if (!existingHandlers.includes("cleanupAllDomains")) {
+    ScriptApp.newTrigger("cleanupAllDomains")
+      .timeBased()
+      .everyDays(1)
+      .atHour(cleanupHour)
+      .create();
+    cleanupTriggerCreated = true;
+    existingHandlers.push("cleanupAllDomains");
+    Logger.log(`Created daily trigger for cleanupAllDomains (at hour ${cleanupHour}).`);
+  } else {
+    Logger.log("Daily trigger for cleanupAllDomains already exists for current user.");
+  }
+
+  const result = {
+    processTriggerCreated: processTriggerCreated,
+    cleanupTriggerCreated: cleanupTriggerCreated,
+    activeTriggerHandlers: existingHandlers
+  };
+  Logger.log(`Trigger status for current user: ${JSON.stringify(result)}`);
+  return result;
 }
 
 /**

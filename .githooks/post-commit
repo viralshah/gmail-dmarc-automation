@@ -34,9 +34,9 @@ if ! clasp status &>/dev/null; then
   exit 0
 fi
 
-# Push changes
+# Push changes (--force allows non-interactive manifest updates when appsscript.json changes)
 echo "==> Pushing changes to Apps Script..."
-clasp push
+clasp push --force
 
 # Create a new version and parse the version number
 echo "==> Creating a new version..."
