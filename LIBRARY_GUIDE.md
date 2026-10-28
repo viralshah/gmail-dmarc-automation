@@ -163,6 +163,7 @@ If you are running directly inside the library script project itself (as the own
    - **Note (`Script Properties` UI vs. `UserProperties`):** The table in **Project Settings (`⚙️`) → Script Properties** edits global `ScriptProperties` (shared across all users). Google's Apps Script IDE has no GUI for per-user `UserProperties`, so they are managed via the toolbar functions at the top of `Code.gs`:
      - **`provisionOnce`** — provisions a new domain and appends its `spreadsheetId` to your `UserProperties`.
      - **`registerExistingSheetsOnce`** — paste any existing spreadsheet IDs into the array and click **Run** to add them to your `UserProperties`.
+     - **`unregisterSheetsOnce`** — paste any spreadsheet IDs you want to stop processing into the array and click **Run** to remove them from your `UserProperties`.
      - **`getRegisteredSheets`** — click **Run** to print your account's saved spreadsheet IDs in the Execution log.
 3. Under **Triggers (`⏰`)**, add two daily time-driven triggers directly on **`processAllDomains`** and **`cleanupAllDomains`**. When run by a trigger without arguments, they automatically read that user's saved spreadsheet IDs from `UserProperties`.
 
@@ -188,7 +189,7 @@ function provisionExampleDomain() {
 }
 ```
 
-`provisionDomain` creates the spreadsheet and its tabs, fills `Config`, saves the `spreadsheetId` to the executing user's `UserProperties`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and creates the filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not enabled it skips the filter and logs the one to create by hand.
+`provisionDomain` is idempotent: if a spreadsheet for that domain is already registered in `UserProperties` (matching the domain's `DMARC Label Name` or sheet title), it reuses it instead of creating a duplicate. Otherwise it creates the spreadsheet and its tabs, fills `Config`, saves the `spreadsheetId` to the executing user's `UserProperties`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and creates the filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not enabled it skips the filter and logs the one to create by hand.
 
 ### Interactive Summary Filtering (Control Cells)
 

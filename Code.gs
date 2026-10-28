@@ -6,13 +6,6 @@
 // =============================================================================
 
 /**
- * Optional fallback Spreadsheet ID for legacy single-sheet standalone setups.
- * Prefer `provisionOnce()` / `UserProperties` or passing spreadsheet IDs to
- * library functions instead of hardcoding an ID here.
- */
-const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
-
-/**
  * Key used in `PropertiesService.getUserProperties()` to store the JSON array
  * of spreadsheet IDs owned/managed by the currently executing Google account.
  */
@@ -84,6 +77,21 @@ function registerExistingSheetsOnce() {
     // "1_abc123_your_existing_spreadsheet_id"
   ];
   return registerSheet(existingSheetIds);
+}
+
+/**
+ * One-time helper to remove one or more spreadsheet ID(s) from the currently
+ * logged-in user's `UserProperties` list from the editor toolbar.
+ * Paste the spreadsheet ID(s) to remove into `sheetIdsToRemove` below, select
+ * `unregisterSheetsOnce` in the toolbar dropdown, and click Run.
+ *
+ * @return {string[]} The updated list of registered spreadsheet IDs for this user.
+ */
+function unregisterSheetsOnce() {
+  const sheetIdsToRemove = [
+    // "1_abc123_spreadsheet_id_to_remove"
+  ];
+  return unregisterSheet(sheetIdsToRemove);
 }
 
 /**
@@ -513,54 +521,6 @@ function deleteOldProcessedDMARCEmails(ssOrId) {
 }
 
 /**
- * Combined trigger helper: searches Gmail to auto-label recent DMARC report
- * emails and then processes them in a single run.
- * (Only needed if you did not configure a Gmail filter to apply the label on arrival.)
- *
- * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
- */
-function autoLabelAndProcessDMARCReports(ssOrId) {
-  autoLabelDMARCReports(ssOrId);
-  processDMARCReports(ssOrId);
-}
-
-/**
- * Search Gmail messages from the last 7 days with common DMARC report subjects
- * and `.xml`, `.zip`, or `.gz` attachments, and apply the configured DMARC label.
- *
- * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
- */
-function autoLabelDMARCReports(ssOrId) {
-  let labelName = "DMARC";
-  try {
-    const ss = getSpreadsheet(ssOrId);
-    labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
-  } catch (e) {
-    Logger.log("Could not load spreadsheet config for autoLabelDMARCReports, using default 'DMARC' label: " + e.message);
-  }
-
-  // Search for emails from common DMARC senders with .xml/.zip/.gz attachments in the last 7 days
-  var threads = GmailApp.search(
-    'newer_than:7d (subject:"Report domain:" OR subject:"DMARC" OR subject:"Aggregate report") has:attachment'
-  );
-  var label = getOrCreateLabel(labelName);
-  threads.forEach(function(thread) {
-    var messages = thread.getMessages();
-    var hasDMARC = messages.some(function(msg) {
-      var attachments = msg.getAttachments();
-      return attachments.some(function(att) {
-        var name = att.getName().toLowerCase();
-        return name.endsWith('.xml') || name.endsWith('.zip') || name.endsWith('.gz');
-      });
-    });
-    var threadLabels = thread.getLabels().map(function(l) { return l.getName(); });
-    if (hasDMARC && threadLabels.indexOf(label.getName()) === -1) {
-      thread.addLabel(label);
-    }
-  });
-}
-
-/**
  * Spreadsheet edit trigger handler: automatically refreshes the `Summary` tab
  * when the interactive filter control cells (`C2` for date range or `C3` for
  * `ALL` historical months) are modified.
@@ -581,26 +541,6 @@ function onEdit(e) {
   }
 }
 
-/**
- * Spreadsheet open trigger handler: adds the "DMARC Tools" custom menu to the
- * Google Sheets UI when the script is bound to a spreadsheet.
- */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("DMARC Tools")
-    .addItem("Process DMARC Reports", "processDMARCReports")
-    .addItem("Send Email Report Now", "forceSendScheduledDMARCReport")
-    .addToUi();
-}
-
-/**
- * Menu callback helper: immediately dispatches the PDF summary email report
- * for the active spreadsheet, bypassing the configured schedule frequency.
- */
-function forceSendScheduledDMARCReport() {
-  sendScheduledDMARCReport(undefined, true);
-}
-
 
 // =============================================================================
 // 3. DOMAIN PROVISIONING, SHEET INITIALIZATION & USER PROPERTIES
@@ -615,9 +555,13 @@ function forceSendScheduledDMARCReport() {
 /**
  * Create and configure everything for one domain: the spreadsheet with its
  * `Config`, `Help`, `Dashboard`, and `DMARC Reports` tabs, the Gmail labels,
- * and the Gmail filter that labels incoming aggregate reports. Idempotent for
- * labels and the filter; always creates a new spreadsheet and registers its ID
- * in the executing user's `UserProperties`.
+ * and the Gmail filter that labels incoming aggregate reports.
+ *
+ * Fully idempotent: if a spreadsheet for `domain` is already registered in the
+ * executing user's `UserProperties` (matching the domain's `DMARC Label Name`
+ * in `Config` or the spreadsheet title) and has not been trashed, reuses that
+ * spreadsheet instead of creating a duplicate (unless `options.forceCreate` is
+ * `true`).
  *
  * @param {string} [domain]          e.g. "example.com". Defaults to the active user's email domain.
  * @param {Object} [options]
@@ -631,7 +575,8 @@ function forceSendScheduledDMARCReport() {
  * @param {number} [options.emailRetentionDays=30]
  * @param {number} [options.alertThreshold=3]
  * @param {string} [options.reportFrequency="Weekly"]
- * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean, registeredSheets: string[]}}
+ * @param {boolean} [options.forceCreate=false]  If `true`, creates a new spreadsheet even if one is already registered.
+ * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean, alreadyExisted: boolean, registeredSheets: string[]}}
  */
 function provisionDomain(domain, options) {
   const userEmail = Session.getActiveUser().getEmail() || "";
@@ -648,25 +593,43 @@ function provisionDomain(domain, options) {
   const processedLabel = `${label}/processed`;
   const ruaList = [].concat(o.ruaAddresses || [`dmarc-rua@${resolvedDomain}`]);
 
-  // Spreadsheet and tabs
-  const ss = SpreadsheetApp.create(sheetName);
-  setupConfigSheet(ss);
-  setConfigValue(ss, "Report Recipients (comma separated)", o.recipients || userEmail);
-  setConfigValue(ss, "Retention Months", o.retentionMonths || 12);
-  setConfigValue(ss, "DMARC Label Name", label);
-  setConfigValue(ss, "DMARC Processed Label Name", processedLabel);
-  setConfigValue(ss, "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", o.reportFrequency || "Weekly");
-  setConfigValue(ss, "Google Drive Archive Folder Name", "DMARC Archives");
-  setConfigValue(ss, "Email Retention Days", o.emailRetentionDays || 30);
-  setConfigValue(ss, "Alert Failure Threshold", o.alertThreshold || 3);
-  setConfigValue(ss, "Alert Ignore Source IP Prefixes (comma separated)", o.ignoreSourceIpPrefixes || "");
-  setupHelpSheet(ss);
-  setupDashboardSheet(ss);
-  getOrCreateSheet(ss, "DMARC Reports", REPORT_SHEET_HEADERS);
-  const defaultSheet = ss.getSheetByName("Sheet1");
-  if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
+  // Check if a spreadsheet for this domain is already registered in UserProperties
+  let ss = !o.forceCreate ? findRegisteredSheetForDomain(resolvedDomain, sheetName, label) : null;
+  const alreadyExisted = Boolean(ss);
 
-  // Save the new spreadsheet ID in the running user's UserProperties
+  if (alreadyExisted) {
+    Logger.log(`Domain ${resolvedDomain} already has a registered spreadsheet (${ss.getId()}); reusing it instead of creating a duplicate.`);
+    setupConfigSheet(ss);
+    if (o.recipients !== undefined) setConfigValue(ss, "Report Recipients (comma separated)", o.recipients);
+    if (o.retentionMonths !== undefined) setConfigValue(ss, "Retention Months", o.retentionMonths);
+    if (o.reportFrequency !== undefined) setConfigValue(ss, "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", o.reportFrequency);
+    if (o.emailRetentionDays !== undefined) setConfigValue(ss, "Email Retention Days", o.emailRetentionDays);
+    if (o.alertThreshold !== undefined) setConfigValue(ss, "Alert Failure Threshold", o.alertThreshold);
+    if (o.ignoreSourceIpPrefixes !== undefined) setConfigValue(ss, "Alert Ignore Source IP Prefixes (comma separated)", o.ignoreSourceIpPrefixes);
+    setupHelpSheet(ss);
+    setupDashboardSheet(ss);
+    getOrCreateSheet(ss, "DMARC Reports", REPORT_SHEET_HEADERS);
+  } else {
+    // Create new spreadsheet and initialize tabs
+    ss = SpreadsheetApp.create(sheetName);
+    setupConfigSheet(ss);
+    setConfigValue(ss, "Report Recipients (comma separated)", o.recipients || userEmail);
+    setConfigValue(ss, "Retention Months", o.retentionMonths || 12);
+    setConfigValue(ss, "DMARC Label Name", label);
+    setConfigValue(ss, "DMARC Processed Label Name", processedLabel);
+    setConfigValue(ss, "Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", o.reportFrequency || "Weekly");
+    setConfigValue(ss, "Google Drive Archive Folder Name", "DMARC Archives");
+    setConfigValue(ss, "Email Retention Days", o.emailRetentionDays || 30);
+    setConfigValue(ss, "Alert Failure Threshold", o.alertThreshold || 3);
+    setConfigValue(ss, "Alert Ignore Source IP Prefixes (comma separated)", o.ignoreSourceIpPrefixes || "");
+    setupHelpSheet(ss);
+    setupDashboardSheet(ss);
+    getOrCreateSheet(ss, "DMARC Reports", REPORT_SHEET_HEADERS);
+    const defaultSheet = ss.getSheetByName("Sheet1");
+    if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
+  }
+
+  // Save/confirm the spreadsheet ID in the running user's UserProperties
   const registeredSheets = registerSheet(ss.getId());
 
   // Gmail labels
@@ -682,6 +645,7 @@ function provisionDomain(domain, options) {
     label: label,
     processedLabel: processedLabel,
     filterCreated: filterCreated,
+    alreadyExisted: alreadyExisted,
     registeredSheets: registeredSheets
   };
   Logger.log(`Provisioned ${resolvedDomain}: ${JSON.stringify(result)}`);
@@ -689,6 +653,36 @@ function provisionDomain(domain, options) {
     Logger.log(`Create the Gmail filter by hand: to:(${ruaList.join(" OR ")}) → apply label "${label}", skip the inbox.`);
   }
   return result;
+}
+
+/**
+ * Check if any spreadsheet currently registered in the user's `UserProperties`
+ * already belongs to the given domain (matching either its `DMARC Label Name`
+ * in `Config` or its spreadsheet title). Skips trashed or inaccessible sheets.
+ *
+ * @param {string} domain    e.g. "example.com"
+ * @param {string} sheetName Expected title, e.g. "Example.com DMARC Report Analysis"
+ * @param {string} label     Expected Gmail label, e.g. "example.com_dmarc_rua"
+ * @return {SpreadsheetApp.Spreadsheet|null} The existing Spreadsheet, or `null` if none found.
+ */
+function findRegisteredSheetForDomain(domain, sheetName, label) {
+  const registeredIds = getRegisteredSheets();
+  const targetName = (sheetName || "").toLowerCase();
+  const targetLabel = (label || "").toLowerCase();
+  for (const id of registeredIds) {
+    try {
+      if (DriveApp.getFileById(id).isTrashed()) continue;
+      const candidate = SpreadsheetApp.openById(id);
+      const candidateName = (candidate.getName() || "").toLowerCase();
+      const candidateLabel = String(getConfigValue(candidate, "DMARC Label Name", "")).trim().toLowerCase();
+      if ((targetLabel && candidateLabel === targetLabel) || (targetName && candidateName === targetName)) {
+        return candidate;
+      }
+    } catch (e) {
+      Logger.log(`findRegisteredSheetForDomain: skipping inaccessible sheet ${id}: ${e}`);
+    }
+  }
+  return null;
 }
 
 /**
@@ -748,13 +742,17 @@ function registerSheet(spreadsheetIdOrIds) {
 }
 
 /**
- * Remove a spreadsheet ID from the current user's `UserProperties` list.
+ * Remove one or more spreadsheet IDs from the current user's `UserProperties` list.
+ * Can be called programmatically or via `unregisterSheetsOnce()` from the toolbar.
  *
- * @param {string} idToRemove The spreadsheet ID to remove.
+ * @param {string|string[]} spreadsheetIdOrIds One spreadsheet ID or an array of IDs to remove.
  * @return {string[]} The updated list of registered spreadsheet IDs for this user.
  */
-function unregisterSheet(idToRemove) {
-  const current = getRegisteredSheets().filter(id => id !== idToRemove);
+function unregisterSheet(spreadsheetIdOrIds) {
+  const toRemove = [].concat(spreadsheetIdOrIds || [])
+    .map(id => (typeof id === "string" ? id.trim() : ""))
+    .filter(Boolean);
+  const current = getRegisteredSheets().filter(id => !toRemove.includes(id));
   PropertiesService.getUserProperties().setProperty(USER_PROP_SHEETS_KEY, JSON.stringify(current));
   Logger.log(`Registered sheets for current user after removal: ${JSON.stringify(current)}`);
   return current;
@@ -1781,8 +1779,95 @@ function getOrCreateLabel(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
 
+
+// =============================================================================
+// 7. LEGACY / BACKWARD-COMPATIBILITY FUNCTIONS
+// =============================================================================
+//
+// Retained at the bottom of the file so older single-sheet, container-bound, or
+// filterless setups continue working without cluttering the top of the Apps
+// Script toolbar dropdown.
+
 /**
- * Diagnostic helper: log the names of all worksheet tabs in the target spreadsheet.
+ * Optional fallback Spreadsheet ID for legacy single-sheet standalone setups.
+ * Prefer `provisionOnce()` / `UserProperties` or passing spreadsheet IDs to
+ * library functions instead of hardcoding an ID here.
+ */
+const spreadsheetId = "YOUR_SPREADSHEET_ID_HERE";
+
+/**
+ * Legacy combined trigger helper: searches Gmail to auto-label recent DMARC
+ * report emails and then processes them in a single run.
+ * (Only needed if you did not configure a Gmail filter or `provisionDomain` to
+ * apply the label on arrival.)
+ *
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
+ */
+function autoLabelAndProcessDMARCReports(ssOrId) {
+  autoLabelDMARCReports(ssOrId);
+  processDMARCReports(ssOrId);
+}
+
+/**
+ * Legacy auto-labeler: searches Gmail messages from the last 7 days with common
+ * DMARC report subjects and `.xml`, `.zip`, or `.gz` attachments, and applies
+ * the configured DMARC label.
+ *
+ * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
+ */
+function autoLabelDMARCReports(ssOrId) {
+  let labelName = "DMARC";
+  try {
+    const ss = getSpreadsheet(ssOrId);
+    labelName = getConfigValue(ss, "DMARC Label Name", "DMARC");
+  } catch (e) {
+    Logger.log("Could not load spreadsheet config for autoLabelDMARCReports, using default 'DMARC' label: " + e.message);
+  }
+
+  // Search for emails from common DMARC senders with .xml/.zip/.gz attachments in the last 7 days
+  var threads = GmailApp.search(
+    'newer_than:7d (subject:"Report domain:" OR subject:"DMARC" OR subject:"Aggregate report") has:attachment'
+  );
+  var label = getOrCreateLabel(labelName);
+  threads.forEach(function(thread) {
+    var messages = thread.getMessages();
+    var hasDMARC = messages.some(function(msg) {
+      var attachments = msg.getAttachments();
+      return attachments.some(function(att) {
+        var name = att.getName().toLowerCase();
+        return name.endsWith('.xml') || name.endsWith('.zip') || name.endsWith('.gz');
+      });
+    });
+    var threadLabels = thread.getLabels().map(function(l) { return l.getName(); });
+    if (hasDMARC && threadLabels.indexOf(label.getName()) === -1) {
+      thread.addLabel(label);
+    }
+  });
+}
+
+/**
+ * Legacy container-bound spreadsheet open trigger handler: adds the
+ * "DMARC Tools" custom menu to the Google Sheets UI.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("DMARC Tools")
+    .addItem("Process DMARC Reports", "processDMARCReports")
+    .addItem("Send Email Report Now", "forceSendScheduledDMARCReport")
+    .addToUi();
+}
+
+/**
+ * Legacy menu callback helper: immediately dispatches the PDF summary email
+ * report for the active spreadsheet, bypassing the configured schedule frequency.
+ */
+function forceSendScheduledDMARCReport() {
+  sendScheduledDMARCReport(undefined, true);
+}
+
+/**
+ * Legacy diagnostic helper: logs the names of all worksheet tabs in the target
+ * spreadsheet.
  *
  * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
  */

@@ -158,6 +158,7 @@ If you own this script project (or share it with your other Google accounts as a
    - **Important (`Script Properties` UI vs. `UserProperties`):** Do **not** set `SHEETS` under **Project Settings (`⚙️`) → Script Properties**—that UI edits global `ScriptProperties`, which are shared across all users of the project. Google's Apps Script IDE does not have a UI screen for per-user `UserProperties`; instead:
      - **To add a newly provisioned sheet:** Run `provisionOnce()` (saves to your `UserProperties` automatically).
      - **To register an already-existing sheet:** Paste its ID into `registerExistingSheetsOnce()` at the top of `Code.gs` and click **Run**.
+     - **To unregister/remove a sheet:** Paste its ID into `unregisterSheetsOnce()` at the top of `Code.gs` and click **Run**.
      - **To view your saved sheets:** Select `getRegisteredSheets` in the toolbar dropdown and click **Run** (prints your account's list in the Execution log).
 4. In **Triggers (`⏰`)**, add two daily time-driven triggers directly on:
    - **`processAllDomains`**
@@ -194,7 +195,10 @@ function provisionExampleDomain() {
 }
 ```
 
-`provisionDomain(domain, options)` creates the spreadsheet (named
+`provisionDomain(domain, options)` is idempotent: if a spreadsheet for `domain`
+is already registered in `UserProperties` (and not trashed), it reuses that
+spreadsheet instead of creating a duplicate (unless `options.forceCreate` is
+`true`). Otherwise it creates the spreadsheet (named
 `<Domain> DMARC Report Analysis` unless `options.sheetName` says otherwise),
 runs the Config/Help/Dashboard setup, fills Config with the standard values
 (`<domain>_dmarc_rua` label and its `/processed` sub-label, recipients
@@ -275,7 +279,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
 
 - `provisionOnce()` / `provisionDomain(domain, options)` — create sheet, Config, labels and Gmail filter for a new domain; saves the spreadsheet ID in the running user's `UserProperties` and returns it.
 - `processAllDomains(ids)` / `cleanupAllDomains(ids)` — run the daily jobs for several sheets from one script (uses `ids` if passed, or falls back to the running user's registered sheets in `UserProperties`).
-- `getRegisteredSheets()` / `registerSheet(id)` / `unregisterSheet(id)` — inspect or manage the current user's spreadsheet IDs stored in `UserProperties`.
+- `getRegisteredSheets()` / `registerExistingSheetsOnce()` / `unregisterSheetsOnce()` / `registerSheet(id)` / `unregisterSheet(id)` — inspect or manage the current user's spreadsheet IDs stored in `UserProperties`.
 
 - `autoLabelDMARCReports(ssOrId)`: Labels new DMARC emails in Gmail.
 - `processDMARCReports(ssOrId)`: Processes all labeled DMARC emails, parses attachments, appends data, enriches, updates summary, dashboard, and exports CSV. **(Recommended main trigger if you set up the Gmail filter)**.
