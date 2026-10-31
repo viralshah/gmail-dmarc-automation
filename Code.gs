@@ -22,6 +22,13 @@ const REPORT_SHEET_HEADERS = [
   "DMARC Result", "Envelope To", "DKIM Signatures"
 ];
 
+/**
+ * Developer-metadata keys stamped on each spreadsheet after a successful
+ * `processDMARCReports` run, so you can tell which code version last touched it.
+ */
+const META_SCRIPT_VERSION_KEY = "dmarcScriptVersion";
+const META_LAST_PROCESSED_KEY = "dmarcLastProcessed";
+
 
 // =============================================================================
 // 1. INTERACTIVE / RUN-ONCE SETUP FUNCTIONS (Apps Script Editor Toolbar)
@@ -126,12 +133,13 @@ function ensureDailyTriggers(options) {
 /**
  * Inspect all spreadsheet IDs registered in the current user's `UserProperties`
  * and log a detailed table mapping each spreadsheet ID to its domain, sheet
- * title, Gmail label, status (`ACTIVE`, `TRASHED`, or `INACCESSIBLE`), and URL.
+ * title, Gmail label, status (`ACTIVE`, `TRASHED`, or `INACCESSIBLE`), last
+ * processed time and script version, and URL.
  *
  * Select `showRegisteredSheets` in the toolbar dropdown and click Run, then
  * check the Execution log.
  *
- * @return {Array<{spreadsheetId: string, domain: string, sheetName: string, label: string, status: string, url: string}>}
+ * @return {Array<{spreadsheetId: string, domain: string, sheetName: string, label: string, status: string, scriptVersion: string, lastProcessed: string, url: string}>}
  */
 function showRegisteredSheets() {
   const ids = getRegisteredSheets();
@@ -139,12 +147,13 @@ function showRegisteredSheets() {
     Logger.log("No spreadsheets are currently registered in UserProperties for this user.");
     return [];
   }
-  Logger.log(`Registered DMARC Spreadsheets for current user (${ids.length}):`);
+  Logger.log(`Registered DMARC Spreadsheets for current user (${ids.length}), current script version ${getScriptVersion()}:`);
   const details = ids.map((id, idx) => {
     const info = inspectRegisteredSheet(id);
     Logger.log(
       `  [${idx + 1}/${ids.length}] [${info.status}] Domain: ${info.domain} | ` +
-      `Sheet: "${info.sheetName}" | Label: ${info.label} | ID: ${info.spreadsheetId}` +
+      `Sheet: "${info.sheetName}" | Label: ${info.label} | ` +
+      `Last processed: ${info.lastProcessed} (version ${info.scriptVersion}) | ID: ${info.spreadsheetId}` +
       (info.url ? ` | URL: ${info.url}` : "")
     );
     return info;
@@ -210,6 +219,7 @@ function unregisterSheetsOnce() {
  * @param {string|string[]|Object} [spreadsheetIds] Optional spreadsheet ID(s), or trigger event object.
  */
 function processAllDomains(spreadsheetIds) {
+  Logger.log(`processAllDomains: running script version ${getScriptVersion()}`);
   resolveSpreadsheetIds(spreadsheetIds).forEach(id => {
     try {
       processDMARCReports(id);
@@ -523,11 +533,13 @@ function processDMARCReports(ssOrId) {
               <a href="${sheetUrl}" style="background-color: #1a73e8; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block; font-size: 14px;">Open DMARC Analysis Sheet</a>
             </div>
             <p style="font-size: 12px; color: #5f6368; margin-top: 25px; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 15px;">
-              This alert was generated automatically by the DMARC Analyzer script.
+              This alert was generated automatically by the DMARC Analyzer script (version ${getScriptVersion()}).
             </p>
           </div>
         </div>
       `;
+
+      plainTextBody += `Script version: ${getScriptVersion()}\n`;
 
       MailApp.sendEmail({
         to: Session.getActiveUser().getEmail(),
@@ -557,6 +569,9 @@ function processDMARCReports(ssOrId) {
 
     // --- Scheduled report (if on trigger) ---
     sendScheduledDMARCReport(ss);
+
+    // Stamp which code version processed this sheet (shown on Help and in showRegisteredSheets)
+    recordProcessingRun(ss);
 
   } catch (err) {
     Logger.log("Error in processDMARCReports: " + err);
@@ -853,6 +868,8 @@ function inspectRegisteredSheet(id) {
       sheetName: sheetName,
       label: label || "DMARC",
       status: isTrashed ? "TRASHED" : "ACTIVE",
+      scriptVersion: getSheetMetadata(ss, META_SCRIPT_VERSION_KEY) || "never processed",
+      lastProcessed: getSheetMetadata(ss, META_LAST_PROCESSED_KEY) || "-",
       url: ss.getUrl()
     };
   } catch (e) {
@@ -862,6 +879,8 @@ function inspectRegisteredSheet(id) {
       sheetName: isTrashed ? "(Trashed spreadsheet)" : "(Inaccessible spreadsheet)",
       label: "-",
       status: isTrashed ? "TRASHED" : "INACCESSIBLE",
+      scriptVersion: "-",
+      lastProcessed: "-",
       url: ""
     };
   }
@@ -1067,6 +1086,7 @@ function setupHelpSheet(ssOrId) {
   // Title Block
   helpSheet.getRange(1, 1).setValue('DMARC Reporting Tool - Help & Documentation')
     .setFontWeight('bold').setFontSize(16).setFontColor('#1a73e8').setFontFamily('Arial');
+  writeHelpVersionLine(ss, helpSheet);
   
   // Section: Usage Instructions
   helpSheet.getRange(3, 1).setValue('Usage Instructions:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
@@ -1661,10 +1681,10 @@ function sendScheduledDMARCReport(ssOrId, force) {
   const sheetName = ss.getName();
   const ssUrl = `${ss.getUrl()}#gid=${summarySheet.getSheetId()}`;
   const subject = `DMARC Summary Report: ${sheetName}`;
-  const plainTextBody = `Please find attached the latest DMARC summary report for ${sheetName}.\n\nYou can access the live DMARC Analysis Google Sheet here:\n${ssUrl}`;
+  const plainTextBody = `Please find attached the latest DMARC summary report for ${sheetName}.\n\nYou can access the live DMARC Analysis Google Sheet here:\n${ssUrl}\n\nScript version: ${getScriptVersion()}`;
   const htmlBody = `<p>Please find attached the latest DMARC summary report for <strong>${sheetName}</strong>.</p>` +
                    `<p>You can access the live DMARC Analysis Google Sheet here: <a href="${ssUrl}">${sheetName}</a>.</p>` +
-                   `<br><hr style="border: 0; border-top: 1px solid #ddd;"><p style="font-size: 11px; color: #666;">This is an automated report generated by the DMARC Analyzer script.</p>`;
+                   `<br><hr style="border: 0; border-top: 1px solid #ddd;"><p style="font-size: 11px; color: #666;">This is an automated report generated by the DMARC Analyzer script (version ${getScriptVersion()}).</p>`;
 
   MailApp.sendEmail({
     to: recipients,
@@ -2020,6 +2040,73 @@ function getOrCreateSheet(ss, name, headers) {
  */
 function getOrCreateLabel(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
+}
+
+/**
+ * The deployed code version: git short SHA and commit date, written to the
+ * generated `Version.gs` by the post-commit hook before `clasp push`.
+ * Returns "unknown (manual install)" when `Version.gs` is absent (e.g. Code.gs
+ * pasted into the editor by hand).
+ *
+ * @return {string}
+ */
+function getScriptVersion() {
+  return typeof SCRIPT_VERSION !== "undefined" ? SCRIPT_VERSION : "unknown (manual install)";
+}
+
+/**
+ * Read a developer-metadata value stored on the spreadsheet itself.
+ *
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ * @param {string} key
+ * @return {string|null}
+ */
+function getSheetMetadata(ss, key) {
+  const match = ss.getDeveloperMetadata().find(m => m.getKey() === key);
+  return match ? match.getValue() : null;
+}
+
+/**
+ * Create or update a developer-metadata value on the spreadsheet itself.
+ *
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ * @param {string} key
+ * @param {string} value
+ */
+function setSheetMetadata(ss, key, value) {
+  const match = ss.getDeveloperMetadata().find(m => m.getKey() === key);
+  if (match) match.setValue(value);
+  else ss.addDeveloperMetadata(key, value);
+}
+
+/**
+ * Stamp the spreadsheet with the current script version and run time after a
+ * successful `processDMARCReports`, and refresh the line on the Help tab.
+ *
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ */
+function recordProcessingRun(ss) {
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm z");
+  setSheetMetadata(ss, META_SCRIPT_VERSION_KEY, getScriptVersion());
+  setSheetMetadata(ss, META_LAST_PROCESSED_KEY, now);
+  const helpSheet = ss.getSheetByName("Help");
+  if (helpSheet) writeHelpVersionLine(ss, helpSheet);
+}
+
+/**
+ * Write the "Last processed ... by version ..." line under the Help tab title.
+ *
+ * @param {SpreadsheetApp.Spreadsheet} ss
+ * @param {SpreadsheetApp.Sheet} helpSheet
+ */
+function writeHelpVersionLine(ss, helpSheet) {
+  const lastProcessed = getSheetMetadata(ss, META_LAST_PROCESSED_KEY);
+  const version = getSheetMetadata(ss, META_SCRIPT_VERSION_KEY);
+  const text = lastProcessed
+    ? `Last processed ${lastProcessed} by script version ${version}.`
+    : `Not processed yet (current script version ${getScriptVersion()}).`;
+  helpSheet.getRange(2, 1).setValue(text)
+    .setFontStyle('italic').setFontSize(9).setFontColor('#5f6368').setFontFamily('Arial');
 }
 
 

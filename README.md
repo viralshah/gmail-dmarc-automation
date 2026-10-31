@@ -274,11 +274,27 @@ If you prefer editing the code locally and want to automate pushing and deployin
      chmod +x .githooks/post-commit
      ```
    - Every time you run `git commit`, git will automatically run the hook.
-   - The hook will push your updated `Code.gs` and `appsscript.json` to Google Apps Script (`clasp push`).
+   - The hook writes a `Version.gs` file containing the commit's short SHA and date (e.g. `d8a7b3d (2026-10-31)`, with `-dirty` added if `Code.gs`/`appsscript.json` had uncommitted changes). The file is gitignored and only exists to be pushed (see [Which version is running?](#which-version-is-running)).
+   - The hook will push your updated `Code.gs`, `appsscript.json`, and `Version.gs` to Google Apps Script (`clasp push`).
    - It will automatically increment the version number and create a new version using your git commit message as the version description (`clasp version`).
    - It will find your library deployment and update it to point to the new version automatically (`clasp deploy`).
 
 *Note: If clasp is not logged in or you haven't replaced the placeholder Script ID, the hook will fail silently and skip the deploy process, so your standard git commits won't be blocked.*
+
+*Note: If you run `clasp push` by hand instead, whatever `Version.gs` is lying around from the last hook run gets pushed, so the reported version may be out of date. Commit and let the hook deploy, or run `.githooks/post-commit` yourself.*
+
+### Which version is running?
+
+Each sheet and email records the code version that produced it:
+- **Each spreadsheet:** after a successful run, `processDMARCReports` stamps the sheet with the script version and run time (stored as spreadsheet developer metadata, so it isn't lost when the Help tab is rewritten). The line under the **Help** tab title shows it: *"Last processed 2026-10-31 07:12 GMT by script version d8a7b3d (2026-10-31)."*
+- **`showRegisteredSheets`:** prints the current script version, then each sheet's last processed time and version. A sheet with an older version, or "never processed", hasn't picked up the latest code yet, or its trigger isn't running.
+- **Logs and emails:** `processAllDomains` logs the version at the start of each run, and the alert and PDF summary emails show it in the footer.
+
+The version shows as `unknown (manual install)` when `Version.gs` wasn't deployed (e.g. `Code.gs` pasted into the editor by hand).
+
+Which version a sheet runs depends on the setup:
+- **Option A (triggers in this project):** triggers always run the latest pushed code (HEAD), so every sheet picks up a push on its next run.
+- **Option B (consumer scripts):** each consumer runs the library version selected under **Libraries** in that script (unless **Development mode** is on, which runs HEAD). Consumers stay on their version until someone updates it there. The version stamp lets you check which version each one is on.
 
 ---
 
@@ -313,7 +329,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
 ### Interactive Toolbar & Provisioning Functions
 - `provisionOnce()` / `provisionDomain(domain, options)` — idempotently create (or reuse) the spreadsheet, `Config`/`Help`/`Dashboard`/`DMARC Reports` tabs, Gmail labels, Gmail filter, and daily triggers for a domain; saves the spreadsheet ID in the running user's `UserProperties`.
 - `ensureDailyTriggers(options)` — idempotently install the two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) for the currently logged-in user.
-- `showRegisteredSheets()` — inspect all spreadsheets registered in the current user's `UserProperties` and log their domain, sheet title, Gmail label, status (`ACTIVE`/`TRASHED`/`INACCESSIBLE`), ID, and URL.
+- `showRegisteredSheets()` — inspect all spreadsheets registered in the current user's `UserProperties` and log their domain, sheet title, Gmail label, status (`ACTIVE`/`TRASHED`/`INACCESSIBLE`), last processed time and script version, ID, and URL.
 - `pruneTrashedRegisteredSheets()` / `cleanupTrashedRegisteredSheets(options)` — detect registered spreadsheets that have been moved to Google Drive Trash and unregister them (prompts for Yes/No confirmation when run from a Sheet UI).
 - `unregisterSheetsOnce()` / `unregisterSheet(ids)` / `registerSheet(ids)` / `getRegisteredSheets()` — manage the current user's spreadsheet IDs in `UserProperties`.
 
@@ -385,6 +401,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
 - **Script not running?**
   - Open the **Triggers (`⏰`)** tab and check there's a `processAllDomains` and a `cleanupAllDomains` row marked **Owned by: Me**. Rows marked **Owned by: Other user** belong to another account and only process *that* account's sheets. If yours are missing, run `ensureDailyTriggers`.
   - Run `showRegisteredSheets` and check the Execution log. If no sheets are listed, the triggers have nothing to process: run `provisionOnce` (or `registerExistingSheetsOnce` for an older sheet). Sheets showing `TRASHED` or `INACCESSIBLE` can be removed with `pruneTrashedRegisteredSheets` / `unregisterSheetsOnce`.
+  - Check the "Last processed" line on the sheet's Help tab (or the `showRegisteredSheets` output). If it's old, the sheet's runs are failing or not happening at all.
   - Check **Executions** for authorization errors. After an update that adds a scope you need to re-authorize (see [Security & Privacy](#security--privacy)).
   - Don't put sheet IDs under **Project Settings → Script Properties**; the script reads your per-user `UserProperties`, not Script Properties.
   - Legacy single-sheet setups only: make sure the `spreadsheetId` variable in the **Legacy** section at the bottom of `Code.gs` is set, or pass the ID to the functions.

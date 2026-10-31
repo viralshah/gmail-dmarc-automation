@@ -202,6 +202,10 @@ function provisionExampleDomain() {
 
 Other `provisionDomain` options: `recipients`, `sheetName`, `retentionMonths` (default 12), `emailRetentionDays` (default 30), `alertThreshold` (default 3), `reportFrequency` (default `Weekly`), `forceCreate`, and, for Option A, `processHour` / `cleanupHour` (default 6 and 7, in the project time zone; only used when the triggers are first created).
 
+### Checking Which Library Version a Sheet Uses
+
+Consumer scripts run the library version selected under **Libraries** in that script (or HEAD if **Development mode** is on), not necessarily the latest deployment. Every processed sheet records the version that last processed it on the line under its **Help** tab title, e.g. *"Last processed 2026-10-31 07:12 GMT by script version d8a7b3d (2026-10-31)."* `DMARC.showRegisteredSheets()` also lists it for every sheet registered to the running user, and the alert and PDF emails show it in their footers. To upgrade a consumer, pick the new version under **Libraries** in that script.
+
 ### Interactive Summary Filtering (Control Cells)
 
 The `Summary` sheet contains control cells that allow you to filter reports on the fly:
