@@ -57,6 +57,7 @@ function provisionOnce() {
   const options = {
     // ruaAddresses: ["dmarc-rua@example.com"],          // defaults to dmarc-rua@<domain>
     // ignoreSourceIpPrefixes: "209.85.220., 104.30.",   // known forwarders to silence alerts on
+    // processHour: 6, cleanupHour: 7,                   // daily trigger hours (only used when first created)
   };
   return provisionDomain(domain, options);
 }
@@ -564,18 +565,18 @@ function processDMARCReports(ssOrId) {
 
 /**
  * Move processed DMARC report emails older than the configured retention period
- * (`Email Retention Days` in the `Config` sheet, defaulting to 7 days) to Trash.
+ * (`Email Retention Days` in the `Config` sheet, defaulting to 30 days) to Trash.
  * Run on a daily trigger (or via `cleanupAllDomains`) to keep the mailbox clean.
  *
  * @param {string|SpreadsheetApp.Spreadsheet} [ssOrId] Optional spreadsheet ID or Spreadsheet object.
  */
 function deleteOldProcessedDMARCEmails(ssOrId) {
   let processedLabelName = "DMARC/Processed";
-  let retentionDays = 7;
+  let retentionDays = 30;
   try {
     const ss = getSpreadsheet(ssOrId);
     processedLabelName = getConfigValue(ss, "DMARC Processed Label Name", "DMARC/Processed");
-    retentionDays = parseInt(getConfigValue(ss, "Email Retention Days", 7), 10) || 7;
+    retentionDays = parseInt(getConfigValue(ss, "Email Retention Days", 30), 10) || 30;
   } catch (e) {
     Logger.log("Could not load spreadsheet config for deleteOldProcessedDMARCEmails: " + e.message);
   }
@@ -642,6 +643,9 @@ function onEdit(e) {
  * @param {number} [options.alertThreshold=3]
  * @param {string} [options.reportFrequency="Weekly"]
  * @param {boolean} [options.forceCreate=false]  If `true`, creates a new spreadsheet even if one is already registered.
+ * @param {boolean} [options.createTriggers=true]  If `false`, skips `ensureDailyTriggers()`.
+ * @param {number} [options.processHour=6]  Passed to `ensureDailyTriggers()`; only applies when the trigger is first created.
+ * @param {number} [options.cleanupHour=7]  Passed to `ensureDailyTriggers()`; only applies when the trigger is first created.
  * @return {{spreadsheetId: string, url: string, label: string, processedLabel: string, filterCreated: boolean, alreadyExisted: boolean, registeredSheets: string[]}}
  */
 function provisionDomain(domain, options) {
@@ -1004,7 +1008,7 @@ function setupConfigSheet(ssOrId) {
     ["DMARC Processed Label Name", "DMARC/Processed"],
     ["Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)", "Weekly"],
     ["Google Drive Archive Folder Name", "DMARC Archives"],
-    ["Email Retention Days", 7],
+    ["Email Retention Days", 30],
     ["Alert Failure Threshold", 3],
     ["Alert Ignore Source IP Prefixes (comma separated)", ""]
   ];
@@ -1067,17 +1071,50 @@ function setupHelpSheet(ssOrId) {
   // Section: Usage Instructions
   helpSheet.getRange(3, 1).setValue('Usage Instructions:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
   const instructions = [
-    ['1. DMARC reports are processed automatically from your Gmail.'],
+    ['1. DMARC reports are processed automatically from your Gmail once a day: emails with the "DMARC Label Name" label are parsed, then moved to the "DMARC Processed Label Name" label.'],
     ['2. The "DMARC Reports" sheet contains all parsed data.'],
-    ['3. The "Summary" and "Dashboard" sheets provide visual analytics.'],
-    ['4. The "Config" sheet lets you set report recipients, retention, and label names.'],
+    ['3. The "Summary" and "Dashboard" sheets provide visual analytics. Summary shows the current month by default; see Summary Controls below.'],
+    ['4. The "Config" sheet lets you set report recipients, retention, alerting, and label names (see Config Settings below).'],
     ['5. Data older than the retention period is purged automatically.'],
-    ['6. Processed emails older than the retention days are cleaned from Gmail automatically.']
+    ['6. Processed emails older than the retention days are cleaned from Gmail automatically.'],
+    ['7. An alert email is sent when a source fails DMARC outright (neither aligned DKIM nor aligned SPF passed) at least "Alert Failure Threshold" times in one report. A row where only one check failed is a DMARC pass and does not alert.'],
+    ['8. This Help tab is rewritten on every daily run, so edits made here are not kept.']
   ];
   helpSheet.getRange(4, 1, instructions.length, 1).setValues(instructions).setFontFamily('Arial').setFontSize(10);
-  
-  // Section: Column Definitions
+
+  // Section: Summary Controls
   let startRow = 4 + instructions.length + 2;
+  helpSheet.getRange(startRow, 1).setValue('Summary Controls:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
+  const summaryControls = [
+    ['Cell', 'Usage'],
+    ['Summary!C2', 'Date range as YYYY-MM-DD:YYYY-MM-DD (e.g. 2025-05-01:2025-05-30). Leave blank for all dates. The Summary refreshes when you edit this cell.'],
+    ['Summary!C3', 'Type ALL to aggregate every month of data (including archived months), or leave blank for the current month only. The Summary refreshes when you edit this cell.']
+  ];
+  helpSheet.getRange(startRow + 1, 1, summaryControls.length, 2).setValues(summaryControls).setFontFamily('Arial').setFontSize(10);
+  helpSheet.getRange(startRow + 1, 1, 1, 2).setFontWeight('bold').setBackground('#f1f3f4').setBorder(true, true, true, true, null, null, null, null);
+  helpSheet.getRange(startRow + 1, 1, summaryControls.length, 2).setBorder(true, true, true, true, true, true);
+
+  // Section: Config Settings
+  startRow = startRow + summaryControls.length + 3;
+  helpSheet.getRange(startRow, 1).setValue('Config Settings:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
+  const configDefs = [
+    ['Setting', 'Description'],
+    ['Report Recipients (comma separated)', 'Who receives the scheduled PDF summary and the failure alerts.'],
+    ['Retention Months', 'Rows older than this many months are purged from "DMARC Reports" (default 12).'],
+    ['DMARC Label Name', 'Gmail label the script reads reports from (provisioned sheets use <domain>_dmarc_rua).'],
+    ['DMARC Processed Label Name', 'Gmail label processed reports are moved to (provisioned sheets use <domain>_dmarc_rua/processed).'],
+    ['Email Report Frequency (Daily/Weekly/Fortnightly/Monthly/Never)', 'How often the PDF summary is emailed: Daily (every run), Weekly (Mondays), Fortnightly (every other Monday), Monthly (the 1st), or Never.'],
+    ['Google Drive Archive Folder Name', 'Parent Drive folder for the monthly CSV exports; each spreadsheet gets its own subfolder named after it.'],
+    ['Email Retention Days', 'Processed report emails older than this many days are moved to Gmail Trash (default 30).'],
+    ['Alert Failure Threshold', 'Minimum DMARC-fail count for one source in one report before it alerts (default 3).'],
+    ['Alert Ignore Source IP Prefixes (comma separated)', 'IPs or prefixes (e.g. 209.85.220., 104.30.) of known forwarders whose failures should not alert. Rows are still recorded.']
+  ];
+  helpSheet.getRange(startRow + 1, 1, configDefs.length, 2).setValues(configDefs).setFontFamily('Arial').setFontSize(10);
+  helpSheet.getRange(startRow + 1, 1, 1, 2).setFontWeight('bold').setBackground('#f1f3f4').setBorder(true, true, true, true, null, null, null, null);
+  helpSheet.getRange(startRow + 1, 1, configDefs.length, 2).setBorder(true, true, true, true, true, true);
+
+  // Section: Column Definitions
+  startRow = startRow + configDefs.length + 3;
   helpSheet.getRange(startRow, 1).setValue('DMARC Reports - Column Definitions:').setFontWeight('bold').setFontSize(12).setFontFamily('Arial');
   
   const colDefs = [

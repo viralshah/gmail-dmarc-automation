@@ -115,7 +115,7 @@ function runDailyDMARCProcessor() {
   // DMARC.autoLabelAndProcessDMARCReports();
 }
 
-// Clean up trigger function: removes processed labels from Gmail threads older than retention days.
+// Clean up trigger function: moves processed report emails older than "Email Retention Days" (default 30) to Gmail Trash.
 function runDailyCleanup() {
   DMARC.deleteOldProcessedDMARCEmails();
 }
@@ -188,13 +188,19 @@ function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
 function provisionExampleDomain() {
   const r = DMARC.provisionDomain("example.com", {
     ruaAddresses: ["dmarc-rua@example.com"],          // what your DMARC rua tag says
-    ignoreSourceIpPrefixes: "209.85.220., 104.30."    // known forwarders, optional
+    ignoreSourceIpPrefixes: "209.85.220., 104.30.",   // known forwarders, optional
+    createTriggers: false                             // this script has its own triggers (above)
   });
   Logger.log(JSON.stringify(r));
 }
 ```
 
-`provisionDomain` is idempotent: if a spreadsheet for that domain is already registered in `UserProperties` (matching the domain's `DMARC Label Name` or sheet title), it reuses it instead of creating a duplicate. Otherwise it creates the spreadsheet and its tabs, fills `Config`, saves the `spreadsheetId` to the executing user's `UserProperties`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and creates the filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not enabled it skips the filter and logs the one to create by hand.
+`provisionDomain` is idempotent: if a spreadsheet for that domain is already registered in `UserProperties` (matching the domain's `DMARC Label Name` or sheet title), it reuses it instead of creating a duplicate. Otherwise it creates the spreadsheet and its tabs, fills `Config`, saves the `spreadsheetId` to the executing user's `UserProperties`, creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` labels, and creates the filter `to:(<rua addresses>) → label, skip inbox`. If the Gmail API is not enabled it skips the filter and logs the one to create by hand. Rerunning it is safe: an existing matching filter and existing triggers are left alone.
+
+> [!IMPORTANT]
+> Pass `createTriggers: false` when calling `provisionDomain` from a consumer script, as in the example. Otherwise it also runs `ensureDailyTriggers`, which installs triggers on `processAllDomains` / `cleanupAllDomains` in *your* script, where those functions only exist as `DMARC.processAllDomains` / `DMARC.cleanupAllDomains`, so the triggers would fail. Delete those two rows in the Triggers tab if that already happened.
+
+Other `provisionDomain` options: `recipients`, `sheetName`, `retentionMonths` (default 12), `emailRetentionDays` (default 30), `alertThreshold` (default 3), `reportFrequency` (default `Weekly`), `forceCreate`, and, for Option A, `processHour` / `cleanupHour` (default 6 and 7, in the project time zone; only used when the triggers are first created).
 
 ### Interactive Summary Filtering (Control Cells)
 
@@ -247,6 +253,9 @@ When external users run your library for the first time, Google will ask them to
 - `https://www.googleapis.com/auth/script.scriptapp` (to install daily triggers automatically via `ensureDailyTriggers`)
 - `https://www.googleapis.com/auth/script.external_request` (for GeoIP lookups via `ip-api.com` and PDF export)
 - `https://www.googleapis.com/auth/script.send_mail` (to email failure alerts and PDF summary reports)
+- `https://www.googleapis.com/auth/userinfo.email` (to default the domain and report recipients to the running user's email address)
+
+These are declared explicitly in `appsscript.json` (`oauthScopes`). When a new version adds a scope, every user has to authorize again: run any function from the editor once (or, for consumer scripts, any function that calls the library) and approve the prompt. Until then, their daily triggers fail with an authorization error.
 
 All authorization prompts will state that the script belongs to *your* email address (the library owner). Let your users know to expect this.
 

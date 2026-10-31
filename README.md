@@ -24,10 +24,11 @@ This Google Apps Script automates the entire workflow of collecting, parsing, st
   - Drill-down hyperlinks for quick investigation
 - "Dashboard" sheet with KPIs and trendline charts
 - "Config" sheet for report recipients and retention settings
-- "Help" sheet with usage and glossary
+- "Help" sheet with usage, Summary controls, Config settings, column definitions, and glossary (refreshed on every run)
 - Monthly archiving to new sheets and automatic CSV export to Google Drive
 - Scheduled PDF summary report sent via email to recipients
-- Cleans up processed emails after 7 days and purges old data per retention policy
+- Cleans up processed emails after 30 days (configurable) and purges old data per retention policy
+- One script can manage several domains, and several Google accounts can share it, each with its own sheets and triggers
 - No logos or branding images for a clean, professional look
 - Easy to deploy and use for non-technical stakeholders
 
@@ -38,29 +39,32 @@ This Google Apps Script automates the entire workflow of collecting, parsing, st
 - **Truly automated:** All DMARC report handling is fully automated, including enrichment, archiving, and reporting.
 - **Enterprise-ready:** Summary and dashboard provide actionable insights for security and compliance.
 - **No logo/branding clutter:** Clean, professional, and organization-neutral.
-- **Mailbox hygiene:** Automatically deletes processed emails after 7 days.
-- **Easy to deploy:** Just copy, configure, and set up triggers.
+- **Mailbox hygiene:** Automatically deletes processed emails after 30 days (configurable).
+- **Easy to deploy:** Run `provisionOnce()` once and the sheet, Gmail labels, filter, and triggers are all created for you.
 
 ---
 
 ## Prerequisites
 
-- A Google account with access to Gmail and Google Drive
-- A Google Sheet to store DMARC data (create a new one or use an existing one)
+- A Google account with access to Gmail and Google Drive (the account that receives the DMARC `rua` reports)
+- The **Gmail API advanced service** enabled in the script project (already declared in this repo's `appsscript.json`; if you paste `Code.gs` by hand, add it under **Services → `+` → Gmail API**). Needed only so `provisionDomain` can create the Gmail filter.
 - Basic familiarity with Google Apps Script (for setup)
+- You do **not** need to create a Google Sheet first; `provisionOnce()` creates it. (Only the legacy manual setup below needs an existing sheet.)
 
 ---
 
 ## Setup Instructions
 
 ### Recommended: Automated One-Click Setup (`provisionOnce`)
-1. Create a standalone Apps Script project at [script.google.com](https://script.google.com), paste [`Code.gs`](file:///Code.gs), and enable **Services → `+` → Gmail API** (or clone this repo and run `clasp push`).
+1. Create a standalone Apps Script project at [script.google.com](https://script.google.com), paste [`Code.gs`](Code.gs), and enable **Services → `+` → Gmail API** (or clone this repo and run `clasp push`).
 2. In `provisionOnce()` at the top of `Code.gs`, edit `domain` / `options` if needed (or leave `domain = ""` to automatically use your logged-in Google account's email domain).
 3. Select **`provisionOnce`** in the toolbar dropdown and click **Run**.
    - Automatically creates the `<Domain> DMARC Report Analysis` Google Sheet and all its tabs (`Config`, `Help`, `Dashboard`, `DMARC Reports`).
    - Automatically creates the `<domain>_dmarc_rua` and `<domain>_dmarc_rua/processed` Gmail labels and the inbox-skipping Gmail filter.
    - Automatically saves the spreadsheet ID in your account's `PropertiesService.getUserProperties()`.
-   - Automatically installs your two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) via `ensureDailyTriggers()`.
+   - Automatically installs your two daily time-driven triggers (`processAllDomains` and `cleanupAllDomains`) via `ensureDailyTriggers()`. By default processing runs between 6–7am and cleanup between 7–8am, in the project time zone (`Europe/London` in `appsscript.json`; change `timeZone` there or under **Project Settings** if you are elsewhere). To pick other hours, set `processHour` / `cleanupHour` in `provisionOnce()`'s `options` (or run `ensureDailyTriggers({ processHour: 2, cleanupHour: 3 })`). These only apply when the triggers are first created; existing triggers are never edited or duplicated, so delete them in the Triggers tab first to change the time. Pass `createTriggers: false` to skip trigger creation entirely.
+4. Google asks you to authorize the script the first time you run it (see [Security & Privacy](#security--privacy) for the scopes). Approve it with the account that receives the reports.
+5. Run `showRegisteredSheets` to confirm the sheet is registered, and check the **Triggers (`⏰`)** tab for the two rows marked **Owned by: Me**.
 
 ---
 
@@ -81,7 +85,7 @@ This Google Apps Script automates the entire workflow of collecting, parsing, st
 #### 3. Set Up Gmail Filter and Label (Strongly Recommended)
 
 **Why is this important?**  
-The script relies on a Gmail label (default: `DMARC`) to find and process DMARC report emails. Proper labeling ensures:
+The script relies on a Gmail label (default for manually set-up sheets: `DMARC`; sheets created by `provisionOnce` use `<domain>_dmarc_rua` and create the filter for you) to find and process DMARC report emails. Proper labeling ensures:
 - Only DMARC reports are processed (no false positives).
 - Your inbox stays clean—DMARC emails are archived automatically.
 - The script can run on a schedule without manual intervention.
@@ -196,13 +200,20 @@ function runDailyCleanup()        { DMARC.cleanupAllDomains(SHEETS); }
 Install two daily time-driven triggers on `runDailyDMARCProcessor` and
 `runDailyCleanup`. A failure in one domain is logged and does not stop the rest.
 
+> **Note:** pass `createTriggers: false` when calling `provisionDomain` from a
+> controller script. Otherwise it installs triggers on `processAllDomains` /
+> `cleanupAllDomains` in *your* script, where those functions only exist as
+> `DMARC.processAllDomains` / `DMARC.cleanupAllDomains`, so the triggers would
+> fail. If that already happened, delete those two rows in the Triggers tab.
+
 **Adding a domain** from a consumer controller script is one call:
 
 ```js
 function provisionExampleDomain() {
   const r = DMARC.provisionDomain("example.com", {
     ruaAddresses: ["dmarc-rua@example.com", "dmarc-rua+sub.example@example.com"],
-    ignoreSourceIpPrefixes: "209.85.220., 104.30., 2600:1901:101:"
+    ignoreSourceIpPrefixes: "209.85.220., 104.30., 2600:1901:101:",
+    createTriggers: false   // this script has its own triggers (below); see note
   });
   Logger.log(r.spreadsheetId);   // paste into SHEETS (also saved to UserProperties)
 }
@@ -211,7 +222,8 @@ function provisionExampleDomain() {
 `provisionDomain(domain, options)` is idempotent: if a spreadsheet for `domain`
 is already registered in `UserProperties` (and not trashed), it reuses that
 spreadsheet instead of creating a duplicate (unless `options.forceCreate` is
-`true`). Otherwise it creates the spreadsheet (named
+`true`). Rerunning it is safe: an existing matching filter and existing triggers
+are left alone. Otherwise it creates the spreadsheet (named
 `<Domain> DMARC Report Analysis` unless `options.sheetName` says otherwise),
 runs the Config/Help/Dashboard setup, fills Config with the standard values
 (`<domain>_dmarc_rua` label and its `/processed` sub-label, recipients
@@ -222,7 +234,12 @@ threshold 3, and `options.ignoreSourceIpPrefixes`), saves the spreadsheet ID in
 **Gmail advanced service** in the calling script; if it is not enabled,
 everything else is done and the log tells you what filter to create by hand.
 `options.ruaAddresses` defaults to `dmarc-rua@<domain>`; pass the address(es)
-actually in your DMARC `rua` tag.
+actually in your DMARC `rua` tag. It also installs the running user's daily
+triggers via `ensureDailyTriggers` (`options.processHour` / `options.cleanupHour`
+set the hours, defaults 6 and 7; `options.createTriggers: false` skips this,
+e.g. when your controller script has its own triggers). Other options:
+`recipients`, `sheetName`, `retentionMonths` (12), `emailRetentionDays` (30),
+`alertThreshold` (3), `reportFrequency` (`Weekly`).
 
 Existing per-sheet wrappers keep working; the patterns can coexist in one
 mailbox as long as a given sheet is only run by one of them.
@@ -250,7 +267,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
    ```
    Replace `"YOUR_SCRIPT_ID_HERE"` with your actual Google Apps Script project's Script ID (found under **Project Settings** > **IDs** > **Script ID** in the Apps Script editor).
 4. **Git Auto-Deploy Hook:**
-   We have included a git **post-commit hook** in the repository under the [.githooks/post-commit](file:///.githooks/post-commit) file.
+   We have included a git **post-commit hook** in the repository under the [.githooks/post-commit](.githooks/post-commit) file.
    - To activate the hook for your local repository, configure Git to use the `.githooks` directory:
      ```bash
      git config core.hooksPath .githooks
@@ -268,23 +285,26 @@ If you prefer editing the code locally and want to automate pushing and deployin
 ## How It Works
 
 1. **Labeling:**
-   - The script auto-labels new DMARC emails (with .xml/.zip/.gz attachments) as `DMARC`.
+   - For provisioned sheets, the Gmail filter created by `provisionDomain` labels incoming reports sent to your `rua` address(es) as `<domain>_dmarc_rua` and skips the inbox.
+   - For legacy setups, either your own Gmail filter or `autoLabelDMARCReports` applies the label from the Config sheet (default `DMARC`).
 2. **Processing:**
+   - Each day `processAllDomains` runs `processDMARCReports` for every sheet registered to the trigger owner (a failure in one domain is logged and does not stop the rest).
    - It processes all labeled emails, extracts and parses DMARC XML data, deduplicates, and appends the results to the "DMARC Reports" sheet.
    - Data is enriched with country (GeoIP) and plain-language failure reason.
-   - After processing, emails are moved to the `DMARC/Processed` label and archived.
+   - Sources that fail DMARC outright at least `Alert Failure Threshold` times in one report trigger an alert email.
+   - After processing, emails are moved to the processed label (`<domain>_dmarc_rua/processed`, or `DMARC/Processed` for legacy setups) and archived.
 3. **Summary & Charts:**
    - The script updates a "Summary" sheet with aggregated data, dynamic charts, date-range filtering, and drill-down links.
 4. **Dashboard:**
    - The "Dashboard" sheet provides KPIs and trendline charts for high-level monitoring.
 5. **Config & Help:**
-   - The "Config" sheet manages report recipients and retention settings. The "Help" sheet provides usage and glossary.
+   - The "Config" sheet manages report recipients, labels, alerting, and retention settings. The "Help" sheet explains usage, the Summary controls, every Config setting, the report columns, and a glossary. It is rewritten on each run, so don't edit it by hand.
 6. **Archiving & Export:**
    - Each month, data is archived to a new sheet and a CSV is exported to a Google Drive folder (configurable, defaults to `DMARC Archives`). To prevent conflicts, CSV files are isolated inside subfolders named after the active Spreadsheet (e.g. `DMARC - domain.com`).
 7. **Scheduled Reporting:**
    - A PDF summary is generated and emailed to recipients on a schedule.
 8. **Cleanup:**
-   - Processed emails older than 7 days are deleted. Data older than the retention period is purged.
+   - Each day `cleanupAllDomains` trashes processed emails older than `Email Retention Days` (default 30). Data older than `Retention Months` (default 12) is purged.
 
 ---
 
@@ -310,6 +330,8 @@ If you prefer editing the code locally and want to automate pushing and deployin
 ### Legacy / Backward-Compatibility Functions (at bottom of `Code.gs`)
 - `registerExistingSheetsOnce()` — manually register pre-existing spreadsheet IDs into `UserProperties`.
 - `autoLabelDMARCReports(ssOrId)` / `autoLabelAndProcessDMARCReports(ssOrId)` — search and label DMARC emails in Gmail (only needed if not using a Gmail filter).
+- `onOpen()` / `forceSendScheduledDMARCReport()` — add a **DMARC Tools** menu (Process DMARC Reports / Send Email Report Now) to the Sheets UI. Only works when the script is bound to the spreadsheet (**Extensions → Apps Script**); provisioned sheets don't get the menu.
+- `listSheetNames(ssOrId)` — log the tab names of a spreadsheet (diagnostic).
 
 ---
 
@@ -329,7 +351,7 @@ If you prefer editing the code locally and want to automate pushing and deployin
 - **Change the retention period:** Edit the value in the Config sheet ("Retention Months").
 - **Change report recipients:** Edit the value in the Config sheet ("Report Recipients (comma separated)").
 - **Change the archive folder name:** Edit the value in the Config sheet ("Google Drive Archive Folder Name"). Each spreadsheet will create its own subfolder matching its spreadsheet name inside this parent folder to keep domain reports isolated.
-- **Change the email retention days:** Edit the value in the Config sheet ("Email Retention Days") to specify after how many days processed emails in Gmail should be deleted (defaults to `7` days).
+- **Change the email retention days:** Edit the value in the Config sheet ("Email Retention Days") to specify after how many days processed emails in Gmail should be deleted (defaults to `30` days). Sheets created before this default changed keep whatever value is in their Config sheet; edit it there if you want 30.
 
 ---
 
@@ -338,6 +360,8 @@ If you prefer editing the code locally and want to automate pushing and deployin
 - The script only processes emails with the specified label and attachments.
 - All extracted data is stored in your Google Sheet and Drive; nothing is sent externally (except for GeoIP lookups, see below).
 - You can review and audit all code and logs in Apps Script.
+- The scopes the script asks for are declared in `appsscript.json` (`oauthScopes`): Gmail modify and basic settings (labels, filters, cleanup), Sheets, Drive (CSV export and trash checks), installing triggers, external requests (GeoIP and PDF export), sending mail (alerts and PDF reports), and your email address (default domain and recipients). See [LIBRARY_GUIDE.md](LIBRARY_GUIDE.md#best-practices--security-scopes) for what each one is used for.
+- **Upgrading an existing install:** when a new version adds a scope, Google asks you to authorize again. Daily triggers fail with an authorization error until you do, so run any function (e.g. `showRegisteredSheets`) from the editor once after updating and approve the prompt. Every account that has its own triggers needs to do this.
 
 ---
 
@@ -359,11 +383,15 @@ If you prefer editing the code locally and want to automate pushing and deployin
 ## Troubleshooting
 
 - **Script not running?**
-  - Check that triggers are set up correctly.
-  - Make sure the Sheet ID is correct and you have permission.
-  - Ensure you updated the `spreadsheetId` variable at the top of the script.
+  - Open the **Triggers (`⏰`)** tab and check there's a `processAllDomains` and a `cleanupAllDomains` row marked **Owned by: Me**. Rows marked **Owned by: Other user** belong to another account and only process *that* account's sheets. If yours are missing, run `ensureDailyTriggers`.
+  - Run `showRegisteredSheets` and check the Execution log. If no sheets are listed, the triggers have nothing to process: run `provisionOnce` (or `registerExistingSheetsOnce` for an older sheet). Sheets showing `TRASHED` or `INACCESSIBLE` can be removed with `pruneTrashedRegisteredSheets` / `unregisterSheetsOnce`.
+  - Check **Executions** for authorization errors. After an update that adds a scope you need to re-authorize (see [Security & Privacy](#security--privacy)).
+  - Don't put sheet IDs under **Project Settings → Script Properties**; the script reads your per-user `UserProperties`, not Script Properties.
+  - Legacy single-sheet setups only: make sure the `spreadsheetId` variable in the **Legacy** section at the bottom of `Code.gs` is set, or pass the ID to the functions.
 - **No DMARC emails found?**
-  - Check your Gmail filter and label setup.
+  - Check the label in the Config sheet ("DMARC Label Name") matches the label your emails actually have.
+  - If `provisionOnce` logged that it skipped the filter, either the Gmail API advanced service isn't enabled or the new label wasn't visible to the Gmail API yet. Enable the service if needed and run `provisionOnce` again (it reuses the existing sheet and won't duplicate the filter), or create the logged filter by hand.
+  - Make sure `ruaAddresses` matched the address(es) in your DMARC record's `rua` tag. The filter only matches mail sent `to:` those addresses.
 - **Errors in parsing?**
   - Some malformed DMARC reports may not parse; these are skipped and logged.
 - **Permission errors?**
